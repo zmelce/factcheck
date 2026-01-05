@@ -117,7 +117,7 @@ def make_driver(headless: bool = True):
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
 
-def _click_first(driver, by, sel) -> bool:
+def click_first(driver, by, sel) -> bool:
     try:
         els = driver.find_elements(by, sel)
         if not els:
@@ -134,19 +134,19 @@ def _click_first(driver, by, sel) -> bool:
         pass
     return False
 
-def _try_plain_dom_consent(driver) -> bool:
+def try_plain_dom_consent(driver) -> bool:
     for t in CONSENT_TEXTS:
         xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-        if _click_first(driver, By.XPATH, xp):
+        if click_first(driver, By.XPATH, xp):
             return True
     return False
 
-def _try_iframe_consent(driver) -> bool:
+def try_iframe_consent(driver) -> bool:
     frames = driver.find_elements(By.TAG_NAME, "iframe")
     for fr in frames:
         try:
             driver.switch_to.frame(fr)
-            if _try_plain_dom_consent(driver):
+            if try_plain_dom_consent(driver):
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
@@ -158,7 +158,7 @@ def _try_iframe_consent(driver) -> bool:
             continue
     return False
 
-def _try_didomi_shadow_consent(driver) -> bool:
+def try_didomi_shadow_consent(driver) -> bool:
     js = """
     const TEXTS = arguments[0];
     function searchShadow(root) {
@@ -195,9 +195,9 @@ def _try_didomi_shadow_consent(driver) -> bool:
 def accept_all_consents(driver, timeout=15) -> bool:
     end = time.time() + timeout
     while time.time() < end:
-        if _try_plain_dom_consent(driver): return True
-        if _try_iframe_consent(driver):    return True
-        if _try_didomi_shadow_consent(driver): return True
+        if try_plain_dom_consent(driver): return True
+        if try_iframe_consent(driver):    return True
+        if try_didomi_shadow_consent(driver): return True
         time.sleep(0.4)
     return False
 
@@ -231,7 +231,7 @@ def truncate_at_sentinel(full_html: str, sentinel: str | None) -> str:
 
 
 def handle(review_url: str, headless: bool = True) -> List[str]:
-    SENTINEL_END = None  # mevcut koddaki gibi
+    SENTINEL_END = None
 
     driver = make_driver(headless=headless)
     try:

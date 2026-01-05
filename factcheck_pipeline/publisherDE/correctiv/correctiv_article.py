@@ -45,11 +45,6 @@ def clean_lines(text: str) -> str:
 
 
 def cut_at_stop_phrases(text: str) -> str:
-    """
-    Line-based cutoff (safe): only stop when a footer marker appears as its own line
-    or at the start of a line. This prevents cutting mid-sentence like:
-      "... weisen kein Impressum auf ..."
-    """
     lines = (text or "").splitlines()
     out = []
     for ln in lines:
@@ -86,7 +81,7 @@ def remove_inline_widgets(text: str) -> str:
     return "\n".join(out).strip()
 
 
-def _extract_from_detail_content(html: str) -> Tuple[str, str]:
+def extract_from_detail_content(html: str) -> Tuple[str, str]:
     soup = BeautifulSoup(html, "lxml")
 
     title = ""
@@ -192,7 +187,7 @@ def fetch_and_extract(url: str, timeout: int = 30) -> dict:
     resp.raise_for_status()
     html = resp.text
 
-    title, body = _extract_from_detail_content(html)
+    title, body = extract_from_detail_content(html)
     if len(body) >= 400:
         return {"url": url, "title": title, "content": body}
 

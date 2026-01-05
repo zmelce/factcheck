@@ -16,7 +16,7 @@ Y_EMBED = re.compile(r"https?://(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)
 TT_EMBED_ID = re.compile(r"/embed/(?:v2/)?(\d+)", re.I)
 TT_CANON = re.compile(r"https?://(?:www\.)?tiktok\.com/@[^/]+/video/\d+", re.I)
 
-def _add_qs(u: str, extra: dict) -> str:
+def add_qs(u: str, extra: dict) -> str:
     sp = urlsplit(u)
     qs = dict(parse_qsl(sp.query))
     qs.update(extra or {})
@@ -27,7 +27,7 @@ def canon_youtube(u: str) -> Optional[str]:
     if not m:
         return None
     vid = m.group(1)
-    return _add_qs(f"https://www.youtube.com/embed/{vid}", {"autoplay": "1"})
+    return add_qs(f"https://www.youtube.com/embed/{vid}", {"autoplay": "1"})
 
 def canon_tiktok_from_blockquote(bq) -> Optional[str]:
     cite = (bq.get_attribute("cite") or "").strip()
@@ -68,7 +68,7 @@ CONSENT_TEXTS = [
     "OK","I accept","Agree","Accept all","Reject all"
 ]
 
-def _click_first(driver, by, sel) -> bool:
+def click_first(driver, by, sel) -> bool:
     try:
         for el in driver.find_elements(by, sel):
             try:
@@ -87,7 +87,7 @@ def try_consent(driver, timeout=12) -> bool:
     while time.time() < end:
         for t in CONSENT_TEXTS:
             xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-            if _click_first(driver, By.XPATH, xp):
+            if click_first(driver, By.XPATH, xp):
                 return True
         frames = driver.find_elements(By.TAG_NAME, "iframe")
         for fr in frames:
@@ -95,7 +95,7 @@ def try_consent(driver, timeout=12) -> bool:
                 driver.switch_to.frame(fr)
                 for t in CONSENT_TEXTS:
                     xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-                    if _click_first(driver, By.XPATH, xp):
+                    if click_first(driver, By.XPATH, xp):
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()
@@ -159,7 +159,7 @@ def extract_visible_video_links(url: str, headless: bool = True) -> List[str]:
             if srcdoc:
                 html = unescape(srcdoc)
                 for m in Y_EMBED.finditer(html):
-                    cu2 = _add_qs(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay":"1"})
+                    cu2 = add_qs(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay":"1"})
                     if cu2 not in seen:
                         seen.add(cu2); links.append(cu2)
 

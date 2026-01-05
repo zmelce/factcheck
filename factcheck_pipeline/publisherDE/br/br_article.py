@@ -1,92 +1,57 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Tuple
 
 import requests
 from bs4 import BeautifulSoup
 from readability import Document
 
-STOP_PHRASES = [
-    "Passend dazu",
-    "Du liest Artikel zu Ende",
-    "MÖCHTEST DU MEHR",
-    "Unterstützen",
-    "Vous souhaitez nous poser des questions ou nous soumettre une information qui ne vous paraît pas fiable ? "
-    "N'hésitez pas à nous écrire à l'adresse lesverificateurs@tf1.fr. "
-    "Retrouvez-nous également sur X : notre équipe y est présente derrière le compte @verif_TF1LCI.",
-    ""
-]
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "fr-FR,fr;q=0.9,de-DE,de;q=0.8,en;q=0.7",
+    "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 }
 
+STOP_PHRASES = [
+    "Passend dazu",
+    "Du liest Artikel zu Ende",
+    "MÖCHTEST DU MEHR",
+    "Unterstützen",
+]
 
-def normalize_for_match(s: str) -> str:
-    if not s:
-        return ""
-    s = s.replace("\u00a0", " ")
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = s.lower()
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
+STOP_REGEXES = [
+    r"Wenn\s+Sie\s+zum\s+Faktencheck-Team\s+Kontakt\s+aufnehmen\s+oder\s+Faktenchecks\s+zu\s+relevanten\s+Themen\s+anregen\s+möchten,\s*schreiben\s+Sie\s+bitte\s+an\s+faktencheck@apa\.at",
+]
 
 
 def clean_lines(text: str) -> str:
-    text = text.replace("\u00a0", " ")
+    text = (text or "").replace("\u00a0", " ")
     lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
     return "\n".join(lines).strip()
 
 
-def cut_at_stop_phrases(text: str) -> str:
+def cut_at_stop_markers(text: str) -> str:
     if not text:
-        return text
+        return ""
 
-    norm_text = normalize_for_match(text)
-    cut_norm_idx: int | None = None
+    earliest = None
 
+    for pat in STOP_REGEXES:
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if m:
+            earliest = m.start() if earliest is None else min(earliest, m.start())
+
+    lower = text.lower()
     for phrase in STOP_PHRASES:
-        p = normalize_for_match(phrase)
-        if not p:
-            continue
-        i = norm_text.find(p)
+        i = lower.find(phrase.lower())
         if i != -1:
-            cut_norm_idx = i if cut_norm_idx is None else min(cut_norm_idx, i)
+            earliest = i if earliest is None else min(earliest, i)
 
-    if cut_norm_idx is None:
-        return text.strip()
-
-    acc = []
-    orig_cut = 0
-    for j, ch in enumerate(text):
-        chunk = normalize_for_match(ch)
-        if chunk:
-            acc.append(chunk)
-        cur = " ".join("".join(acc).split())
-    norm_running = ""
-    orig_cut = len(text)
-    for j, ch in enumerate(text):
-        nch = normalize_for_match(ch)
-        if nch:
-            norm_running += nch
-        else:
-            norm_running += " "
-
-        norm_running = re.sub(r"\s+", " ", norm_running)
-
-        if len(norm_running) >= cut_norm_idx:
-            orig_cut = j
-            break
-
-    return text[:orig_cut].strip()
+    return text[:earliest].strip() if earliest is not None else text.strip()
 
 
 def extract_with_readability(html: str) -> Tuple[str, str]:
@@ -103,7 +68,7 @@ def extract_with_readability(html: str) -> Tuple[str, str]:
             parts.append(txt)
 
     body = clean_lines("\n".join(parts))
-    body = cut_at_stop_phrases(body)
+    body = cut_at_stop_markers(body)
     return title, body
 
 
@@ -124,7 +89,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
 
     if not container:
         text = clean_lines(soup.get_text("\n", strip=True))
-        return title, cut_at_stop_phrases(text)
+        return title, cut_at_stop_markers(text)
 
     for tag in container.find_all(["script", "style", "noscript"]):
         tag.decompose()
@@ -136,7 +101,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
             parts.append(txt)
 
     body = clean_lines("\n".join(parts))
-    body = cut_at_stop_phrases(body)
+    body = cut_at_stop_markers(body)
     return title, body
 
 

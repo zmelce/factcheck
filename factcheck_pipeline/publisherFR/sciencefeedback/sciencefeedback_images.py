@@ -46,7 +46,7 @@ def pick_largest_from_srcset(srcset, base):
             best_u, best_w = u, w
     return best_u
 
-def _clean_text(t):
+def clean_text(t):
     return re.sub(r"\s+", " ", (t or "").strip())
 
 def get_ext(u: str) -> str:
@@ -82,16 +82,16 @@ def download_image(url, dest_dir, prefix):
         return None
 
 
-def _is_main_container(tag: Tag) -> bool:
+def is_main_container(tag: Tag) -> bool:
     if not isinstance(tag, Tag) or tag.name != "div":
         return False
     classes = tag.get("class", [])
     return "wp-block-bsaweb-blocks-grid-item" in classes and "col-8@md" in classes
 
-def _find_container(soup: BeautifulSoup) -> Tag | None:
-    return soup.find(_is_main_container)
+def find_container(soup: BeautifulSoup) -> Tag | None:
+    return soup.find(is_main_container)
 
-def _find_verification_block(container: Tag) -> Tag | None:
+def find_verification_block(container: Tag) -> Tag | None:
 
     h2 = container.find("h2", id="verification")
     if not h2:
@@ -105,10 +105,10 @@ def _find_verification_block(container: Tag) -> Tag | None:
         cur = cur.parent
     return h2
 
-def _find_references_heading(container: Tag) -> Tag | None:
+def find_references_heading(container: Tag) -> Tag | None:
     return container.find("h4", id="references")
 
-def _best_img_in_figure(fig: Tag, base: str):
+def best_img_in_figure(fig: Tag, base: str):
     for pic in fig.find_all("picture"):
         for src in pic.find_all("source"):
             ss = src.get("srcset") or src.get("data-srcset")
@@ -140,15 +140,15 @@ def _best_img_in_figure(fig: Tag, base: str):
                 return u
     return None
 
-def _is_inside_footer(node: Tag) -> bool:
+def is_inside_footer(node: Tag) -> bool:
     return bool(node.find_parent("footer"))
 
-def _prune_footers(root: Tag) -> None:
+def prune_footers(root: Tag) -> None:
 
     for ft in root.find_all("footer"):
         ft.decompose()
     for extra in root.select("div.wp-block-group[style*='margin-block-start']"):
-        txt = _clean_text(extra.get_text(" "))
+        txt = clean_text(extra.get_text(" "))
         if any(key in txt for key in ("Tags:", "Published on:", "Éditeur", "Editor:")):
             extra.decompose()
 
@@ -167,17 +167,17 @@ def extract_images_with_captions_scifeed_between_verification_and_references(art
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url
-    container = _find_container(soup)
+    container = find_container(soup)
     if not container:
         return []
 
-    _prune_footers(container)
+    prune_footers(container)
 
-    start_marker = _find_verification_block(container)
+    start_marker = find_verification_block(container)
     if not start_marker:
         return []
 
-    stop_marker = _find_references_heading(container)
+    stop_marker = find_references_heading(container)
 
     figures, started = [], False
     for el in container.descendants:
@@ -190,13 +190,13 @@ def extract_images_with_captions_scifeed_between_verification_and_references(art
         if stop_marker is not None and el is stop_marker:
             break
         if el.name == "figure":
-            if _is_inside_footer(el):
+            if is_inside_footer(el):
                 continue
             figures.append(el)
 
     out, seen = [], set()
     for fig in figures:
-        u = _best_img_in_figure(fig, base)
+        u = best_img_in_figure(fig, base)
         if not u:
             continue
         ext = get_ext(u)
@@ -208,8 +208,8 @@ def extract_images_with_captions_scifeed_between_verification_and_references(art
         cap = ""
         fc = fig.find("figcaption")
         if fc:
-            cap = _clean_text(fc.get_text(" "))
-        out.append({"image_url": u, "caption": cap})  # caption may be ""
+            cap = clean_text(fc.get_text(" "))
+        out.append({"image_url": u, "caption": cap})
 
     return out
 

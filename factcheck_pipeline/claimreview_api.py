@@ -23,7 +23,7 @@ class ClaimReviewItem:
     publisher_site: str
 
 
-def _norm_site(site: str) -> str:
+def norm_site(site: str) -> str:
     s = (site or "").strip().lower()
     if not s:
         return ""
@@ -83,7 +83,7 @@ def flatten_claims(
     review_publisher_site_filter: Optional[str] = None,
 ) -> List[ClaimReviewItem]:
 
-    wanted = _norm_site(review_publisher_site_filter or "")
+    wanted = norm_site(review_publisher_site_filter or "")
 
     items: List[ClaimReviewItem] = []
     for claim in claims:
@@ -92,12 +92,12 @@ def flatten_claims(
         claim_date = claim.get("claimDate", "") or ""
 
         for review in claim.get("claimReview", []) or []:
-            pub_obj = (review.get("publisher") or {})  # <- FIX
+            pub_obj = (review.get("publisher") or {})
             publisher_name = pub_obj.get("name", "") or ""
             publisher_site = pub_obj.get("site", "") or ""
 
 
-            if wanted and _norm_site(publisher_site) != wanted:
+            if wanted and norm_site(publisher_site) != wanted:
                 continue
 
             items.append(

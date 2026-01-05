@@ -24,7 +24,6 @@ def safe_slug(s: str, n=64):
     return s[-n:] if len(s) > n else (s or "article")
 
 def extract_in_page(page):
-    """Return [{image_url, caption}] but ONLY inside #block-factuel-content."""
     return page.evaluate("""
     () => {
       const ROOT = document.querySelector('#block-factuel-content') || document;
@@ -103,7 +102,7 @@ def scrape_with_playwright(url, out_dir,
             viewport={"width": 1366, "height": 900},
         )
 
-        captured = {}  # url -> (content_type, bytes)
+        captured = {}
         def on_response(resp):
             try:
                 ct = (resp.headers.get("content-type") or "").lower()

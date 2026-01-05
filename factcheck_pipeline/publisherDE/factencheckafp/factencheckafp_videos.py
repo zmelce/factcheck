@@ -25,7 +25,7 @@ CONSENT_TEXTS = [
     "Continuer sans consentir","Tout accepter","Tout refuser",
 ]
 
-def _add_autoplay(u: str, autoplay=True) -> str:
+def add_autoplay(u: str, autoplay=True) -> str:
     if not autoplay:
         return u
     sp = urlsplit(u)
@@ -33,7 +33,7 @@ def _add_autoplay(u: str, autoplay=True) -> str:
     qs["autoplay"] = "1"
     return urlunsplit((sp.scheme or "https", sp.netloc, sp.path, urlencode(qs), sp.fragment))
 
-def _canonicalize_youtube(urls, autoplay=True):
+def canonicalize_youtube(urls, autoplay=True):
     seen = set()
     out = []
     for u in urls:
@@ -46,10 +46,10 @@ def _canonicalize_youtube(urls, autoplay=True):
         if vid in seen:
             continue
         seen.add(vid)
-        out.append(_add_autoplay(f"https://www.youtube.com/embed/{vid}", autoplay=autoplay))
+        out.append(add_autoplay(f"https://www.youtube.com/embed/{vid}", autoplay=autoplay))
     return out
 
-def _extract_tweet_id_from_url(u: str) -> str | None:
+def extract_tweet_id_from_url(u: str) -> str | None:
     try:
         sp = urlsplit(u)
         if sp.netloc.endswith(TW_EMBED_HOST) and sp.path.endswith(TW_EMBED_PATH):
@@ -60,7 +60,7 @@ def _extract_tweet_id_from_url(u: str) -> str | None:
         pass
     return None
 
-def _canonicalize_twitter(urls, data_ids=None):
+def canonicalize_twitter(urls, data_ids=None):
     seen = set()
     out = []
     data_ids = data_ids or []
@@ -69,13 +69,13 @@ def _canonicalize_twitter(urls, data_ids=None):
             seen.add(tid)
             out.append(f"https://twitter.com/i/web/status/{tid}")
     for u in urls:
-        tid = _extract_tweet_id_from_url(u)
+        tid = extract_tweet_id_from_url(u)
         if tid and tid not in seen:
             seen.add(tid)
             out.append(f"https://twitter.com/i/web/status/{tid}")
     return out
 
-def _make_driver(headless=True):
+def make_driver(headless=True):
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
@@ -88,7 +88,7 @@ def _make_driver(headless=True):
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
 
-def _try_accept_consents(driver, timeout=8):
+def try_accept_consents(driver, timeout=8):
     end = time.time() + timeout
     while time.time() < end:
         for t in CONSENT_TEXTS:
@@ -147,17 +147,17 @@ def extract_video_iframes(driver, scope_css: str | None = None, autoplay_youtube
             u = "https:" + u
         normalized.append(u)
 
-    youtube = _canonicalize_youtube(normalized, autoplay=autoplay_youtube)
-    twitter = _canonicalize_twitter(normalized, data_ids=tweet_data_ids)
+    youtube = canonicalize_youtube(normalized, autoplay=autoplay_youtube)
+    twitter = canonicalize_twitter(normalized, data_ids=tweet_data_ids)
 
     return {"youtube": youtube, "twitter": twitter}
 
 def handle(review_url: str, headless: bool = True) -> List[str]:
-    driver = _make_driver(headless=headless)
+    driver = make_driver(headless=headless)
     try:
         driver.get(review_url)
         WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        _try_accept_consents(driver, timeout=8)
+        try_accept_consents(driver, timeout=8)
 
         links = extract_video_iframes(driver, scope_css=None, autoplay_youtube=True)
         out: List[str] = []

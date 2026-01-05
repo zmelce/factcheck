@@ -26,20 +26,20 @@ RAW_VIDEO = re.compile(r"https?://[^\"'>]+\.(?:mp4|m3u8)(?:\?[^\"'>]*)?", re.I)
 
 WRAPPER_CSS = "div.page-content-wrapper"
 
-def _abs_http(u: str) -> str:
+def abs_http(u: str) -> str:
     return ("https:" + u) if u and u.startswith("//") else (u or "")
 
-def _strip_qs_frag(u: str) -> str:
+def strip_qs_frag(u: str) -> str:
     sp = urlsplit(u)
     return urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))
 
-def _add_query(u: str, extra: dict) -> str:
+def add_query(u: str, extra: dict) -> str:
     sp = urlsplit(u)
     qs = dict(parse_qsl(sp.query))
     qs.update(extra or {})
     return urlunsplit((sp.scheme, sp.netloc, sp.path, urlencode(qs), sp.fragment))
 
-def _dedupe_keep_shortest_prefix(urls):
+def dedupe_keep_shortest_prefix(urls):
     urls = sorted(set(urls), key=lambda x: (len(x), x))
     out = []
     for u in urls:
@@ -50,20 +50,20 @@ def _dedupe_keep_shortest_prefix(urls):
     return out
 
 def canon_youtube_embed(u: str) -> str | None:
-    u = _abs_http(u)
+    u = abs_http(u)
     m = Y_EMBED.search(u)
     if not m:
         return None
     vid = m.group(1)
-    return _add_query(f"https://www.youtube.com/embed/{vid}", {"autoplay": "1"})
+    return add_query(f"https://www.youtube.com/embed/{vid}", {"autoplay": "1"})
 
 def canon_dailymotion_embed(u: str) -> str | None:
-    u = _abs_http(u)
+    u = abs_http(u)
     m = DM_PLAYER.search(u) or DM_EMBED.search(u)
     return f"https://www.dailymotion.com/embed/video/{m.group(1)}" if m else None
 
 def canon_tiktok_embed(u: str) -> str | None:
-    u = _abs_http(u)
+    u = abs_http(u)
     m = TIKTOK_EMBED.search(u)
     if not m:
         return None
@@ -71,7 +71,7 @@ def canon_tiktok_embed(u: str) -> str | None:
     return f"https://www.tiktok.com/embed/v2/{vid}"
 
 def canon_twitter_status_from_iframe(u: str) -> str | None:
-    u = _abs_http(u)
+    u = abs_http(u)
     if not TW_EMBED.search(u):
         return None
     m = TW_ID.search(u)
@@ -97,7 +97,7 @@ def make_driver(headless: bool = True):
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
 
-def _click_first(driver, by, sel) -> bool:
+def click_first(driver, by, sel) -> bool:
     try:
         els = driver.find_elements(by, sel)
         if not els:
@@ -114,19 +114,19 @@ def _click_first(driver, by, sel) -> bool:
         pass
     return False
 
-def _try_plain_dom_consent(driver) -> bool:
+def try_plain_dom_consent(driver) -> bool:
     for t in CONSENT_TEXTS:
         xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-        if _click_first(driver, By.XPATH, xp):
+        if click_first(driver, By.XPATH, xp):
             return True
     return False
 
-def _try_iframe_consent(driver) -> bool:
+def try_iframe_consent(driver) -> bool:
     frames = driver.find_elements(By.TAG_NAME, "iframe")
     for fr in frames:
         try:
             driver.switch_to.frame(fr)
-            if _try_plain_dom_consent(driver):
+            if try_plain_dom_consent(driver):
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
@@ -138,7 +138,7 @@ def _try_iframe_consent(driver) -> bool:
             continue
     return False
 
-def _try_didomi_shadow_consent(driver) -> bool:
+def try_didomi_shadow_consent(driver) -> bool:
     js = """
     const TEXTS = arguments[0];
     function searchShadow(root) {
@@ -175,13 +175,13 @@ def _try_didomi_shadow_consent(driver) -> bool:
 def accept_all_consents(driver, timeout=15) -> bool:
     end = time.time() + timeout
     while time.time() < end:
-        if _try_plain_dom_consent(driver): return True
-        if _try_iframe_consent(driver):    return True
-        if _try_didomi_shadow_consent(driver): return True
+        if try_plain_dom_consent(driver): return True
+        if try_iframe_consent(driver):    return True
+        if try_didomi_shadow_consent(driver): return True
         time.sleep(0.4)
     return False
 
-def _is_visible_player(driver, el, min_w=40, min_h=40) -> bool:
+def is_visible_player(driver, el, min_w=40, min_h=40) -> bool:
     try:
         if not el.is_displayed():
             return False
@@ -206,7 +206,7 @@ def extract_embeds_from_srcdoc(srcdoc: str):
     html = unescape(srcdoc)
 
     for m in Y_EMBED.finditer(html):
-        res["youtube"].append(_add_query(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay": "1"}))
+        res["youtube"].append(add_query(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay": "1"}))
     for m in DM_PLAYER.finditer(html):
         res["dailymotion"].append(f"https://www.dailymotion.com/embed/video/{m.group(1)}")
     for m in DM_EMBED.finditer(html):
@@ -214,10 +214,10 @@ def extract_embeds_from_srcdoc(srcdoc: str):
     for m in TIKTOK_EMBED.finditer(html):
         res["tiktok"].append(f"https://www.tiktok.com/embed/v2/{m.group(1)}")
     for m in RAW_VIDEO.finditer(html):
-        res["raw_video"].append(_strip_qs_frag(m.group(0)))
+        res["raw_video"].append(strip_qs_frag(m.group(0)))
 
     for k in res:
-        res[k] = _dedupe_keep_shortest_prefix(res[k])
+        res[k] = dedupe_keep_shortest_prefix(res[k])
     return res
 
 def extract_from_wrapper(driver) -> dict[str, list[str]]:
@@ -230,9 +230,9 @@ def extract_from_wrapper(driver) -> dict[str, list[str]]:
 
     iframes = wrapper.find_elements(By.CSS_SELECTOR, "iframe[src]")
     for ifr in iframes:
-        if not _is_visible_player(driver, ifr):
+        if not is_visible_player(driver, ifr):
             continue
-        src = _abs_http((ifr.get_attribute("src") or "").strip())
+        src = abs_http((ifr.get_attribute("src") or "").strip())
         if not src:
             continue
 
@@ -249,7 +249,7 @@ def extract_from_wrapper(driver) -> dict[str, list[str]]:
             if tw:
                 buckets["twitter"].append(tw)
             elif RAW_VIDEO.search(src):
-                buckets["raw_video"].append(_strip_qs_frag(src))
+                buckets["raw_video"].append(strip_qs_frag(src))
 
         srcdoc = (ifr.get_attribute("srcdoc") or "").strip()
         if srcdoc:
@@ -259,18 +259,18 @@ def extract_from_wrapper(driver) -> dict[str, list[str]]:
 
     videos = wrapper.find_elements(By.CSS_SELECTOR, "video")
     for vid in videos:
-        if not _is_visible_player(driver, vid):
+        if not is_visible_player(driver, vid):
             continue
-        vsrc = _abs_http((vid.get_attribute("src") or "").strip())
+        vsrc = abs_http((vid.get_attribute("src") or "").strip())
         if vsrc and RAW_VIDEO.search(vsrc):
-            buckets["raw_video"].append(_strip_qs_frag(vsrc))
+            buckets["raw_video"].append(strip_qs_frag(vsrc))
         for s in vid.find_elements(By.CSS_SELECTOR, "source[src]"):
-            ssrc = _abs_http((s.get_attribute("src") or "").strip())
+            ssrc = abs_http((s.get_attribute("src") or "").strip())
             if ssrc and RAW_VIDEO.search(ssrc):
-                buckets["raw_video"].append(_strip_qs_frag(ssrc))
+                buckets["raw_video"].append(strip_qs_frag(ssrc))
 
     for k, v in buckets.items():
-        buckets[k] = _dedupe_keep_shortest_prefix(v)
+        buckets[k] = dedupe_keep_shortest_prefix(v)
 
     return {k: v for k, v in buckets.items() if v}
 
@@ -286,7 +286,7 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
             driver.execute_script("window.scrollBy(0, 1400);")
             time.sleep(0.2)
 
-        results = extract_from_wrapper(driver)  # dict[str, list[str]]
+        results = extract_from_wrapper(driver)
         if not results:
             return []
 

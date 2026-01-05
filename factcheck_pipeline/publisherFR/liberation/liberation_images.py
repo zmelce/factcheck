@@ -197,7 +197,7 @@ def route_block_noise(page):
         r"|outbrain\.com|quantserve\.com|hotjar\.com|tiktokcdn|fonts\.gstatic\.com|fonts\.googleapis\.com)",
         re.I
     )
-    def _route(route):
+    def route(route):
         req = route.request
         url = req.url
         if BLOCK_RE.search(url):
@@ -205,7 +205,7 @@ def route_block_noise(page):
         if req.resource_type in ("media", "font"):
             return route.abort()
         return route.continue_()
-    page.route("**/*", _route)
+    page.route("**/*", route)
 
 def robust_goto(page, url, max_tries=3, base_timeout=45000):
     for i in range(max_tries):
@@ -340,7 +340,7 @@ def scrape_article_libe(article_url: str, out_dir="libe_assets", headless=True):
                     with open(fpath, "wb") as f: f.write(r.body())
                     rows.append({"image_url": img, "caption": cap, "path": fname})
                 except Exception:
-                    continue  # skip failed downloads silently
+                    continue
 
             for idx, tw in enumerate(tweet_iframes, 1):
                 sel = tw.get("iframeSelector")

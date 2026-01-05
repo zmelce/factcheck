@@ -23,7 +23,7 @@ HEADERS = {
 }
 
 STOP_SELECTORS = [
-    "div.js-newsletter-block",                    # your example
+    "div.js-newsletter-block",
     "div.newsletter-form",
     "div.newsletter-container",
     "form.js-newsletter-form",
@@ -47,7 +47,7 @@ def cut_at_stop_phrases(text: str) -> str:
     return text[:cut_idx].strip() if cut_idx is not None else text
 
 
-def _is_stop_element(el: Tag) -> bool:
+def is_stop_element(el: Tag) -> bool:
     try:
         if el.name == "div":
             classes = el.get("class") or []
@@ -74,14 +74,14 @@ def _is_stop_element(el: Tag) -> bool:
     return False
 
 
-def _collect_text_until_stop(soup: BeautifulSoup) -> str:
+def collect_text_until_stop(soup: BeautifulSoup) -> str:
     parts: list[str] = []
 
     for el in soup.find_all(["div", "h1", "h2", "h3", "p", "blockquote", "li"]):
         if not isinstance(el, Tag):
             continue
 
-        if _is_stop_element(el):
+        if is_stop_element(el):
             break
 
         if el.name in ("h1", "h2", "h3", "p", "blockquote", "li"):
@@ -101,7 +101,7 @@ def extract_with_readability(html: str) -> Tuple[str, str]:
     main_html = doc.summary(html_partial=True)
     soup = BeautifulSoup(main_html, "lxml")
 
-    body = _collect_text_until_stop(soup)
+    body = collect_text_until_stop(soup)
     return title, body
 
 
@@ -128,7 +128,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
         tag.decompose()
 
     container_soup = BeautifulSoup(str(container), "lxml")
-    body = _collect_text_until_stop(container_soup)
+    body = collect_text_until_stop(container_soup)
     return title, body
 
 

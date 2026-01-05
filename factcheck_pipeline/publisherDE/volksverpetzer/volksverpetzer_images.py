@@ -16,6 +16,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import tempfile
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -47,6 +49,35 @@ BLOCK_PLAYERS_CLASSES = {
     "vjs-player", "brightcove", "video", "video-player",
 }
 
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
+import subprocess
+
+_CHROMEDRIVER_PATH: str | None = None
+
+def get_chromedriver_path() -> str:
+    global _CHROMEDRIVER_PATH
+    if _CHROMEDRIVER_PATH is None:
+        _CHROMEDRIVER_PATH = ChromeDriverManager().install()
+        subprocess.run(["chmod", "+x", _CHROMEDRIVER_PATH], capture_output=True)
+    return _CHROMEDRIVER_PATH
+
+
+def make_driver(headless=True):
+    opts = Options()
+    if headless:
+        opts.add_argument("--headless=new")
+    opts.add_argument("--window-size=1440,1100")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--lang=de-DE,de;q=0.9,en;q=0.8")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument(f"--user-agent={UA}")
+    opts.add_argument("--remote-debugging-port=0")
+
+    service = Service(get_chromedriver_path())
+    return webdriver.Chrome(service=service, options=opts)
 def clean(s: str | None) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
 
@@ -101,31 +132,11 @@ def parse_srcset(srcset: str):
 
 from selenium.webdriver.chrome.service import Service
 
-CHROMEDRIVER_PATH = "/Users/melce/bin/chromedriver"
-
-def make_driver(headless=True):
-    opts = Options()
-    if headless:
-        opts.add_argument("--headless=new")
-
-    opts.add_argument("--window-size=1440,1100")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--lang=de-DE,de;q=0.9,en;q=0.8")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument(f"--user-agent={UA}")
-    opts.add_argument("--remote-debugging-port=0")  # helps on some macOS setups
-
-    service = Service(
-        executable_path=CHROMEDRIVER_PATH,
-        port=0,
-        log_output="chromedriver_images.log"
-    )
-    return webdriver.Chrome(service=service, options=opts)
 
 
-def _click_first(driver, by, sel) -> bool:
+
+
+def click_first(driver, by, sel) -> bool:
     try:
         els = driver.find_elements(by, sel)
         for el in els:
@@ -145,16 +156,16 @@ def accept_consents(driver, timeout=15) -> bool:
     while time.time() < end:
         for t in CONSENT_TEXTS:
             xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-            if _click_first(driver, By.XPATH, xp): return True
+            if click_first(driver, By.XPATH, xp): return True
         for t in CONSENT_TEXTS:
             xp = f"//*[self::a or self::span][normalize-space()='{t}' or contains(., '{t}')]"
-            if _click_first(driver, By.XPATH, xp): return True
+            if click_first(driver, By.XPATH, xp): return True
         for fr in driver.find_elements(By.TAG_NAME, "iframe"):
             try:
                 driver.switch_to.frame(fr)
                 for t in CONSENT_TEXTS:
                     xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-                    if _click_first(driver, By.XPATH, xp):
+                    if click_first(driver, By.XPATH, xp):
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()

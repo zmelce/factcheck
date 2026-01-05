@@ -23,7 +23,7 @@ def absurl(base, u):
         return u
     return urljoin(base, u)
 
-def _clean_text(t):
+def clean_text(t):
     return re.sub(r"\s+", " ", (t or "").strip())
 
 def get_ext(u: str) -> str:
@@ -52,7 +52,7 @@ def safe_slug(s, length=64):
     s = s.strip("._")
     return s[-length:] if len(s) > length else (s or "article")
 
-def _prefer_larger(u1, u2):
+def prefer_larger(u1, u2):
     def score(u):
         m = re.search(r'(\d{3,4})w(?:\D|$)', u)
         if m: return int(m.group(1))
@@ -87,8 +87,8 @@ def extract_images_with_captions(article_url):
         fc = fig.find("figcaption", class_="article__legend") or fig.find("figcaption")
         if fc:
             credit_el = fc.select_one(".article__credit")
-            credit = _clean_text(credit_el.get_text(" ")) if credit_el else ""
-            caption = _clean_text(fc.get_text(" "))
+            credit = clean_text(credit_el.get_text(" ")) if credit_el else ""
+            caption = clean_text(fc.get_text(" "))
 
         best_url = None
 
@@ -96,7 +96,7 @@ def extract_images_with_captions(article_url):
             for src in pic.find_all("source"):
                 u = pick_largest_from_srcset(src.get("srcset") or src.get("data-srcset"), base)
                 if u:
-                    best_url = u if not best_url else _prefer_larger(best_url, u)
+                    best_url = u if not best_url else prefer_larger(best_url, u)
             im = pic.find("img")
             if im:
                 u = None
@@ -106,7 +106,7 @@ def extract_images_with_captions(article_url):
                 if not u:
                     u = absurl(base, im.get("src") or im.get("data-src") or im.get("data-original"))
                 if u:
-                    best_url = u if not best_url else _prefer_larger(best_url, u)
+                    best_url = u if not best_url else prefer_larger(best_url, u)
 
         if not best_url:
             im = fig.find("img")

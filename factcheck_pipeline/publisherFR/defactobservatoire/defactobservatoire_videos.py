@@ -68,7 +68,7 @@ def extract_from_srcdoc(srcdoc: str) -> List[str]:
     return extract_attr_urls(html)
 
 def dedupe_keep_shortest(urls: List[str]) -> List[str]:
-    urls = list({u for u in urls})  # exact dedupe first
+    urls = list({u for u in urls})
     urls.sort(key=lambda x: (len(x), x))
     kept = []
     for u in urls:
@@ -154,12 +154,12 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
     try:
         driver.get(review_url)
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        slow_scroll(driver)  # wake lazy embeds
+        slow_scroll(driver)
 
         yt, dm, ult, raws = scrape_inside_defacto(driver)
 
         flat = yt + dm + ult + raws
-        return sorted(set(flat))  # stable dedupe
+        return sorted(set(flat))
     except Exception:
         return []
     finally:

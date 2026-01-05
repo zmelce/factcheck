@@ -17,7 +17,7 @@ TW_IFRAME = re.compile(r"https?://platform\.twitter\.com/embed/Tweet\.html\?[^\"
 TW_ID = re.compile(r"(?:\?|&)id=(\d+)(?:&|$)")
 TW_STATUS = re.compile(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/[^/]+/status/(\d+)", re.I)
 
-def _add_query(u: str, extra: dict) -> str:
+def add_query(u: str, extra: dict) -> str:
     sp = urlsplit(u)
     qs = dict(parse_qsl(sp.query))
     qs.update(extra or {})
@@ -27,7 +27,7 @@ def canon_youtube(u: str) -> str | None:
     m = Y_EMBED.search(u or "")
     if not m: return None
     vid = m.group(1)
-    return _add_query(f"https://www.youtube.com/embed/{vid}", {"autoplay":"1"})
+    return add_query(f"https://www.youtube.com/embed/{vid}", {"autoplay":"1"})
 
 def canon_tweet_from_iframe(u: str) -> str | None:
     if not TW_IFRAME.search(u or ""): return None
@@ -38,7 +38,7 @@ def canon_tweet_from_anchor(u: str) -> str | None:
     m = TW_STATUS.search(u or "")
     return f"https://x.com/i/web/status/{m.group(1)}" if m else None
 
-def _is_visible(locator, min_w=40, min_h=40) -> bool:
+def is_visible(locator, min_w=40, min_h=40) -> bool:
     try:
         box = locator.bounding_box()
         if not box: return False
@@ -70,12 +70,12 @@ def route_block_noise(page):
         r"|outbrain\.com|quantserve\.com|hotjar\.com|tiktokcdn|fonts\.gstatic\.com|fonts\.googleapis\.com)",
         _re.I
     )
-    def _route(route):
+    def route(route):
         req = route.request
         if BLOCK_RE.search(req.url) or req.resource_type in ("media","font"):
             return route.abort()
         return route.continue_()
-    page.route("**/*", _route)
+    page.route("**/*", route)
 
 def robust_goto(page, url, max_tries=3, base_timeout=45000):
     for i in range(max_tries):
@@ -127,16 +127,16 @@ def scroll_until_stable(page, max_scrolls=40, step=1400, idle_ms=350):
 def tweet_node_has_visible_video(page, node_locator) -> bool:
     vid = node_locator.locator("video")
     for i in range(min(vid.count(), 3)):
-        if _is_visible(vid.nth(i), 20, 20): return True
+        if is_visible(vid.nth(i), 20, 20): return True
     vc = node_locator.locator("[data-testid='videoComponent']")
     for i in range(min(vc.count(), 3)):
-        if _is_visible(vc.nth(i), 20, 20): return True
+        if is_visible(vc.nth(i), 20, 20): return True
     thumb = node_locator.locator("img[src*='ext_tw_video_thumb'], [style*='ext_tw_video_thumb']")
     for i in range(min(thumb.count(), 3)):
-        if _is_visible(thumb.nth(i), 20, 20): return True
+        if is_visible(thumb.nth(i), 20, 20): return True
     play_btn = node_locator.get_by_role("button", name=re.compile(r"Lire|Play|Regarder|Watch", re.I))
     for i in range(min(play_btn.count(), 2)):
-        if _is_visible(play_btn.nth(i), 20, 20): return True
+        if is_visible(play_btn.nth(i), 20, 20): return True
     return False
 
 def tweet_iframe_has_video(fr) -> bool:
@@ -150,7 +150,7 @@ def tweet_iframe_has_video(fr) -> bool:
     return False
 
 
-def _extract_links_on_page(page) -> Dict[str, List[str]]:
+def extract_links_on_page(page) -> Dict[str, List[str]]:
     results: Dict[str, List[str]] = {"youtube": [], "twitter": []}
     seen = set()
 
@@ -159,7 +159,7 @@ def _extract_links_on_page(page) -> Dict[str, List[str]]:
     y_iframes = scope.locator("iframe[src*='youtube.com/embed'], iframe[src*='youtube-nocookie.com/embed']")
     for i in range(y_iframes.count()):
         fr = y_iframes.nth(i)
-        if not _is_visible(fr): continue
+        if not is_visible(fr): continue
         src = (fr.get_attribute("src") or "").strip()
         cu = canon_youtube(src)
         if cu and cu not in seen:
@@ -170,7 +170,7 @@ def _extract_links_on_page(page) -> Dict[str, List[str]]:
                 srcdoc = (eh.get_attribute("srcdoc") or "").strip()
                 if srcdoc:
                     for m in Y_EMBED.finditer(srcdoc):
-                        cu2 = _add_query(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay":"1"})
+                        cu2 = add_query(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay":"1"})
                         if cu2 not in seen:
                             seen.add(cu2); results["youtube"].append(cu2)
         except Exception:
@@ -179,7 +179,7 @@ def _extract_links_on_page(page) -> Dict[str, List[str]]:
     tw_ifr = scope.locator("iframe[src*='platform.twitter.com/embed/Tweet.html']")
     for i in range(tw_ifr.count()):
         fr_loc = tw_ifr.nth(i)
-        if not _is_visible(fr_loc, 20, 20): continue
+        if not is_visible(fr_loc, 20, 20): continue
         src = (fr_loc.get_attribute("src") or "").strip()
         fr_handle = fr_loc.element_handle()
         fr = fr_handle.content_frame() if fr_handle else None
@@ -191,7 +191,7 @@ def _extract_links_on_page(page) -> Dict[str, List[str]]:
     tweet_like = scope.locator("[data-testid='tweet'], article[role='article'], div[role='article']")
     for i in range(min(tweet_like.count(), 200)):
         tw = tweet_like.nth(i)
-        if not _is_visible(tw, 20, 20): continue
+        if not is_visible(tw, 20, 20): continue
         if not tweet_node_has_visible_video(page, tw): continue
         anchors = tw.locator("a[href*='/status/']")
         for j in range(min(anchors.count(), 20)):
@@ -208,7 +208,6 @@ def _extract_links_on_page(page) -> Dict[str, List[str]]:
     return results
 
 def extract_visible_video_and_tweet_links(url: str, headless: bool = True) -> List[str]:
-    """Return a flat list of visible video links (YouTube embeds + tweet videos)."""
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,
@@ -236,7 +235,7 @@ def extract_visible_video_and_tweet_links(url: str, headless: bool = True) -> Li
             except PWTimeout: pass
             scroll_until_stable(page, max_scrolls=50, step=1600, idle_ms=350)
 
-            data = _extract_links_on_page(page)
+            data = extract_links_on_page(page)
             out: List[str] = []
             if data.get("youtube"): out.extend(data["youtube"])
             if data.get("twitter"): out.extend(data["twitter"])

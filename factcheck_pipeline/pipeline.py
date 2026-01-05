@@ -27,7 +27,7 @@ def write_jsonl(path: str, record: Dict[str, Any]) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def maybe_remove_empty_dir(path: str) -> None:
+def remove_empty_dir(path: str) -> None:
     try:
         if os.path.isdir(path) and not os.listdir(path):
             os.rmdir(path)
@@ -65,7 +65,7 @@ def sanitize_publisher_key(s: str) -> str:
     return s.replace("-", "_")
 
 
-def _safe_import(module_path: str):
+def safe_import(module_path: str):
     try:
         return importlib.import_module(module_path)
     except ModuleNotFoundError as e:
@@ -74,7 +74,7 @@ def _safe_import(module_path: str):
         raise
 
 
-def _get_callable(mod, attr: str) -> Optional[Callable[..., Any]]:
+def get_callable(mod, attr: str) -> Optional[Callable[..., Any]]:
     if mod is None:
         return None
     fn = getattr(mod, attr, None)
@@ -102,18 +102,18 @@ def load_publisher_modules(
     base_pkg = f"factcheck_pipeline.{publisher_pkg}.{pub}"
 
     article_mod = importlib.import_module(f"{base_pkg}.{pub}_article")
-    article_fetch = _get_callable(article_mod, "fetch_and_extract")
+    article_fetch = get_callable(article_mod, "fetch_and_extract")
     if article_fetch is None:
         raise ImportError(f"{base_pkg}.{pub}_article must define fetch_and_extract(review_url)")
 
-    img_mod = _safe_import(f"{base_pkg}.{pub}_images")
-    images_handle = _get_callable(img_mod, "handle")
+    img_mod = safe_import(f"{base_pkg}.{pub}_images")
+    images_handle = get_callable(img_mod, "handle")
 
-    vid_mod = _safe_import(f"{base_pkg}.{pub}_videos")
-    videos_handle = _get_callable(vid_mod, "handle")
+    vid_mod = safe_import(f"{base_pkg}.{pub}_videos")
+    videos_handle = get_callable(vid_mod, "handle")
 
-    norm_mod = _safe_import(f"{base_pkg}.label_normalizer")
-    label_normalize = _get_callable(norm_mod, "normalize_label")
+    norm_mod = safe_import(f"{base_pkg}.label_normalizer")
+    label_normalize = get_callable(norm_mod, "normalize_label")
 
     return PublisherModules(
         publisher_id=pub,
@@ -206,7 +206,6 @@ def main():
         article_asset_dir = os.path.join(args.assets_dir, f"{pubmods.publisher_id}_{article_id}")
         assets_dir_created = False
 
-        #article_content: Dict[str, Any] = {}
         article_error: Optional[str] = None
         try:
             article_content = pubmods.article_fetch(review_url) or {}
@@ -246,7 +245,7 @@ def main():
         has_media = bool(images) or bool(video_urls)
 
         if assets_dir_created and not has_media:
-            maybe_remove_empty_dir(article_asset_dir)
+            remove_empty_dir(article_asset_dir)
             assets_dir_created = False
 
         label_norm = it.review_label_raw

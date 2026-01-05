@@ -27,7 +27,7 @@ CONSENT_TEXTS = [
 ]
 
 
-def _make_driver(headless: bool = True) -> webdriver.Chrome:
+def make_driver(headless: bool = True) -> webdriver.Chrome:
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
@@ -42,7 +42,7 @@ def _make_driver(headless: bool = True) -> webdriver.Chrome:
     return webdriver.Chrome(options=opts)
 
 
-def _click_first_button_with_text(driver, texts) -> bool:
+def click_first_button_with_text(driver, texts) -> bool:
     for t in texts:
         xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
         els = driver.find_elements(By.XPATH, xp)
@@ -59,17 +59,17 @@ def _click_first_button_with_text(driver, texts) -> bool:
     return False
 
 
-def _accept_consents(driver, timeout: int = 18) -> None:
+def accept_consents(driver, timeout: int = 18) -> None:
     end = time.time() + timeout
     tried_iframes = False
     while time.time() < end:
-        if _click_first_button_with_text(driver, CONSENT_TEXTS):
+        if click_first_button_with_text(driver, CONSENT_TEXTS):
             return
         if not tried_iframes:
             for fr in driver.find_elements(By.TAG_NAME, "iframe"):
                 try:
                     driver.switch_to.frame(fr)
-                    if _click_first_button_with_text(driver, CONSENT_TEXTS):
+                    if click_first_button_with_text(driver, CONSENT_TEXTS):
                         driver.switch_to.default_content()
                         return
                     driver.switch_to.default_content()
@@ -82,13 +82,13 @@ def _accept_consents(driver, timeout: int = 18) -> None:
         time.sleep(0.25)
 
 
-def _slow_scroll(driver, steps: int = 10, dy: int = 1400, pause: float = 0.18) -> None:
+def slow_scroll(driver, steps: int = 10, dy: int = 1400, pause: float = 0.18) -> None:
     for _ in range(steps):
         driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
         time.sleep(pause)
 
 
-def _wait_any_data_renditions(driver, timeout: int = 35) -> bool:
+def wait_any_data_renditions(driver, timeout: int = 35) -> bool:
     js = """
       return Array.from(document.querySelectorAll('[data-renditions]'))
                   .some(n => (n.getAttribute('data-renditions')||'').length > 10);
@@ -100,7 +100,7 @@ def _wait_any_data_renditions(driver, timeout: int = 35) -> bool:
         return False
 
 
-def _extract_progressive_js(driver) -> Optional[str]:
+def extract_progressive_js(driver) -> Optional[str]:
     js = r"""
     const nodes = document.querySelectorAll("[data-renditions]");
     for (const n of nodes) {
@@ -121,12 +121,12 @@ def _extract_progressive_js(driver) -> Optional[str]:
         return None
 
 
-def _extract_progressive_regex(html: str) -> Optional[str]:
+def extract_progressive_regex(html: str) -> Optional[str]:
     for m in re.finditer(r'data-renditions="([^"]+)"', html, flags=re.I):
         raw = m.group(1)
         try:
             data = json.loads(unescape(raw))
-            url = data.get("progressive", {}).get("url")  # <-- fixed: look under progressive.url
+            url = data.get("progressive", {}).get("url")
             if url:
                 return url
         except Exception:
@@ -134,7 +134,7 @@ def _extract_progressive_regex(html: str) -> Optional[str]:
     return None
 
 
-def _sniff_first_mp4(driver) -> Optional[str]:
+def sniff_first_mp4(driver) -> Optional[str]:
     import json as _json
     for entry in driver.get_log("performance"):
         try:
@@ -150,26 +150,26 @@ def _sniff_first_mp4(driver) -> Optional[str]:
 
 
 def handle(review_url: str, headless: bool = True) -> List[str]:
-    driver = _make_driver(headless=headless)
+    driver = make_driver(headless=headless)
     try:
         driver.get(review_url)
         WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        _accept_consents(driver, timeout=18)
+        accept_consents(driver, timeout=18)
 
-        _slow_scroll(driver, steps=10, dy=1200, pause=0.18)
+        slow_scroll(driver, steps=10, dy=1200, pause=0.18)
         driver.execute_script("window.scrollTo(0,0);")
         time.sleep(0.3)
 
         prog: Optional[str] = None
-        if _wait_any_data_renditions(driver, timeout=35):
-            prog = _extract_progressive_js(driver)
+        if wait_any_data_renditions(driver, timeout=35):
+            prog = extract_progressive_js(driver)
 
         if not prog:
             html = driver.page_source or ""
-            prog = _extract_progressive_regex(html)
+            prog = extract_progressive_regex(html)
 
         if not prog:
-            prog = _sniff_first_mp4(driver)
+            prog = sniff_first_mp4(driver)
 
         return [prog] if prog else []
     finally:

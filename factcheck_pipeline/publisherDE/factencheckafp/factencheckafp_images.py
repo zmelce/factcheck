@@ -216,7 +216,7 @@ def route_block_noise(page):
         r"|outbrain\.com|quantserve\.com|hotjar\.com|tiktokcdn|fonts\.gstatic\.com|fonts\.googleapis\.com)",
         re.I
     )
-    def _route(route):
+    def route(route):
         req = route.request
         url = req.url
         if BLOCK_RE.search(url):
@@ -224,7 +224,7 @@ def route_block_noise(page):
         if req.resource_type in ("media", "font"):
             return route.abort()
         return route.continue_()
-    page.route("**/*", _route)
+    page.route("**/*", route)
 
 def robust_goto(page, url, max_tries=3, base_timeout=45000):
     for i in range(max_tries):
@@ -288,7 +288,7 @@ def scrape_article_wrapper_images(article_url: str, out_dir="wrapper_assets", he
         )
         context = browser.new_context(
             user_agent=UA,
-            locale="de-DE",  # site is German in your example; switch to fr-FR if needed
+            locale="de-DE",
             viewport={"width": 1400, "height": 900},
             device_scale_factor=2,
         )
@@ -316,7 +316,7 @@ def scrape_article_wrapper_images(article_url: str, out_dir="wrapper_assets", he
                 w = int(c.get("w") or 0) or infer_width_from_url(c.get("url",""))
                 return (w, ext_priority(c.get("url","")))
 
-            best_by_asset = {}  # canonical_key -> bestCandidate
+            best_by_asset = {}
             for it in items:
                 for c in it.get("candidates", []):
                     u = c.get("url")

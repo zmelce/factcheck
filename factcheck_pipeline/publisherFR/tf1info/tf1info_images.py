@@ -29,25 +29,21 @@ def text_clean(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 def width_from_candidate(candidate: str) -> int:
-    m = re.search(r"\s(\d{3,4})w(\s|$)", candidate)  # " 1280w"
+    m = re.search(r"\s(\d{3,4})w(\s|$)", candidate)
     if m: return int(m.group(1))
-    m = re.search(r"/(\d{3,4})(?:/|$)", candidate)    # "/1280/"
+    m = re.search(r"/(\d{3,4})(?:/|$)", candidate)
     return int(m.group(1)) if m else 0
 
-def _has_class(tag: Tag, needle: str) -> bool:
+def has_class(tag: Tag, needle: str) -> bool:
     classes = tag.get("class", [])
     if isinstance(classes, str):
         classes = [classes]
     return any(needle == c or needle in c for c in classes)
 
-def _is_in_readmore(node: Tag) -> bool:
-    """
-    Return True if node is inside:
-      <section class="... ReadMoreArticle__List ..."> ... </section>
-    """
+def is_in_readmore(node: Tag) -> bool:
     parent = node if isinstance(node, Tag) else None
     while isinstance(parent, Tag):
-        if parent.name == "section" and _has_class(parent, "ReadMoreArticle__List"):
+        if parent.name == "section" and has_class(parent, "ReadMoreArticle__List"):
             return True
         parent = parent.parent
     return False
@@ -108,7 +104,7 @@ def extract_images_with_context(article_url: str):
     def add(img_url: str, container: Tag):
         if not img_url or not is_allowed_url(img_url): return
         if img_url in seen_urls: return
-        if _is_in_readmore(container):  # <-- NEW: skip “Lire aussi” blocks
+        if is_in_readmore(container):
             return
 
         seen_urls.add(img_url)
@@ -123,7 +119,7 @@ def extract_images_with_context(article_url: str):
         })
 
     for fig in article.select("figure, .Picture, .ArticleImage"):
-        if _is_in_readmore(fig):  # <-- NEW: skip entire figure if inside read-more section
+        if is_in_readmore(fig):
             continue
         pic = fig.find("picture")
         if pic:
@@ -154,7 +150,7 @@ def extract_images_with_context(article_url: str):
     for pic in article.find_all("picture"):
         if pic.find_parent("figure"):
             continue
-        if _is_in_readmore(pic):  # <-- NEW
+        if is_in_readmore(pic):
             continue
         u = pick_best_src_from_picture(pic, base)
         if u:
@@ -163,7 +159,7 @@ def extract_images_with_context(article_url: str):
     for img in article.find_all("img"):
         if img.find_parent("figure") or img.find_parent("picture"):
             continue
-        if _is_in_readmore(img):  # <-- NEW
+        if is_in_readmore(img):
             continue
         u = img.get("src") or img.get("data-src") or img.get("data-original")
         if u:

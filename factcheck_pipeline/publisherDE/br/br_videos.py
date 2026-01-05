@@ -1,6 +1,6 @@
-
 from __future__ import annotations
 
+import json
 import re
 import time
 from html import unescape
@@ -9,23 +9,24 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
-import tempfile
-from selenium.webdriver.chrome.service import Service
-
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 CONSENT_TEXTS = [
-    "Cookies akzeptieren","Alle akzeptieren","Alles akzeptieren","Zustimmen","Akzeptieren","Ich stimme zu",
-    "Ohne Zustimmung fortfahren","Weiter ohne Einwilligung","Ablehnen","Alle ablehnen",
-    "Accept all","Agree","I agree","Continue without consent","Reject all",
-    "Continuer sans consentir","Tout accepter","Tout refuser",
+    "Cookies akzeptieren", "Alle akzeptieren", "Alles akzeptieren",
+    "Zustimmen", "Akzeptieren", "Ich stimme zu",
+    "Ohne Zustimmung fortfahren", "Weiter ohne Einwilligung",
+    "Ablehnen", "Alle ablehnen",
+    "Accept all", "Agree", "I agree", "Continue without consent",
+    "Reject all",
+    "Continuer sans consentir", "Tout accepter", "Tout refuser",
 ]
 
 Y_EMBED = re.compile(
@@ -38,24 +39,11 @@ FB_PLUGIN_RE = re.compile(
 )
 
 
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
-import subprocess
-
-_CHROMEDRIVER_PATH: str | None = None
-
-def get_chromedriver_path() -> str:
-    global _CHROMEDRIVER_PATH
-    if _CHROMEDRIVER_PATH is None:
-        _CHROMEDRIVER_PATH = ChromeDriverManager().install()
-        subprocess.run(["chmod", "+x", _CHROMEDRIVER_PATH], capture_output=True)
-    return _CHROMEDRIVER_PATH
-
-
 def make_driver(headless=True):
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
+
     opts.add_argument("--window-size=1440,1100")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
@@ -65,8 +53,7 @@ def make_driver(headless=True):
     opts.add_argument(f"--user-agent={UA}")
     opts.add_argument("--remote-debugging-port=0")
 
-    service = Service(get_chromedriver_path())
-    return webdriver.Chrome(service=service, options=opts)
+    return webdriver.Chrome(options=opts)
 
 
 def click_first_button_with_text(driver, texts) -> bool:
@@ -74,13 +61,16 @@ def click_first_button_with_text(driver, texts) -> bool:
         xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
         for el in driver.find_elements(By.XPATH, xp):
             try:
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center'});", el
+                )
                 time.sleep(0.07)
                 el.click()
                 return True
             except Exception:
                 continue
     return False
+
 
 def accept_consents(driver, timeout: int = 18) -> None:
     end = time.time() + timeout
@@ -104,26 +94,33 @@ def accept_consents(driver, timeout: int = 18) -> None:
             tried_iframes = True
         time.sleep(0.25)
 
+
 def slow_scroll(driver, steps: int = 10, dy: int = 1400, pause: float = 0.18) -> None:
     for _ in range(steps):
         driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
         time.sleep(pause)
 
+
 def add_query(u: str, extra: dict) -> str:
     sp = urlsplit(u)
     qs = dict(parse_qsl(sp.query))
     qs.update(extra or {})
-    return urlunsplit((sp.scheme or "https", sp.netloc, sp.path, urlencode(qs), sp.fragment))
+    return urlunsplit(
+        (sp.scheme or "https", sp.netloc, sp.path, urlencode(qs), sp.fragment)
+    )
+
 
 def youtube_watch_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
+
 
 def extract_youtube_facade_and_iframes(driver) -> List[str]:
     ids = set()
 
     facades = driver.find_elements(
         By.CSS_SELECTOR,
-        "div[data-facadesrc*='youtube.com/embed'], div[data-facadesrc*='youtube-nocookie.com/embed']"
+        "div[data-facadesrc*='youtube.com/embed'], "
+        "div[data-facadesrc*='youtube-nocookie.com/embed']",
     )
     for f in facades:
         src = (f.get_attribute("data-facadesrc") or "").strip()
@@ -136,7 +133,8 @@ def extract_youtube_facade_and_iframes(driver) -> List[str]:
 
     iframes = driver.find_elements(
         By.CSS_SELECTOR,
-        "iframe[src*='youtube.com/embed'], iframe[src*='youtube-nocookie.com/embed']"
+        "iframe[src*='youtube.com/embed'], "
+        "iframe[src*='youtube-nocookie.com/embed']",
     )
     for fr in iframes:
         src = (fr.get_attribute("src") or "").strip()
@@ -153,15 +151,21 @@ def extract_youtube_facade_and_iframes(driver) -> List[str]:
 
     return sorted(youtube_watch_url(i) for i in ids)
 
+
 def extract_facebook_plugin_only(driver) -> List[str]:
     urls = set()
 
-    for fr in driver.find_elements(By.CSS_SELECTOR, "iframe[src*='facebook.com/plugins/video.php']"):
+    for fr in driver.find_elements(
+        By.CSS_SELECTOR, "iframe[src*='facebook.com/plugins/video.php']"
+    ):
         src = (fr.get_attribute("src") or "").strip()
         if src:
             urls.add(src)
 
-    for el in driver.find_elements(By.CSS_SELECTOR, "[data-src-cmplz*='facebook.com/plugins/video.php']"):
+    for el in driver.find_elements(
+        By.CSS_SELECTOR,
+        "[data-src-cmplz*='facebook.com/plugins/video.php']",
+    ):
         ds = (el.get_attribute("data-src-cmplz") or "").strip()
         if ds:
             urls.add(ds)
@@ -172,11 +176,76 @@ def extract_facebook_plugin_only(driver) -> List[str]:
 
     return sorted(urls)
 
+
+def extract_brde_ard_videos(driver) -> List[str]:
+    urls = set()
+
+    ld_scripts = driver.find_elements(
+        By.CSS_SELECTOR, 'script[type="application/ld+json"]'
+    )
+    for script_el in ld_scripts:
+        raw = (script_el.get_attribute("innerHTML") or "").strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(unescape(raw))
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("@type") != "VideoObject":
+                continue
+            content_url = (item.get("contentUrl") or "").strip()
+            if content_url:
+                urls.add(content_url)
+
+    ard_players = driver.find_elements(
+        By.CSS_SELECTOR,
+        "[data-testid='ardplayer'], .ardplayer, "
+        "section[class*='ArticleModuleMedia_wrapper']",
+    )
+    for player in ard_players:
+        media_json = (player.get_attribute("data-mediajson") or "").strip()
+        if media_json:
+            try:
+                mdata = json.loads(unescape(media_json))
+                for stream in mdata.get("_mediaArray", []):
+                    for item in stream.get("_mediaStreamArray", []):
+                        s = item.get("_stream")
+                        if isinstance(s, str) and s.strip():
+                            urls.add(s.strip())
+                        elif isinstance(s, list):
+                            for su in s:
+                                if isinstance(su, str) and su.strip():
+                                    urls.add(su.strip())
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    for section in driver.find_elements(
+        By.CSS_SELECTOR, "section[class*='ArticleModuleMedia_wrapper']"
+    ):
+        for video_el in section.find_elements(By.TAG_NAME, "video"):
+            src = (video_el.get_attribute("src") or "").strip()
+            if src and not src.startswith("blob:"):
+                urls.add(src)
+            for source_el in video_el.find_elements(By.TAG_NAME, "source"):
+                s = (source_el.get_attribute("src") or "").strip()
+                if s and not s.startswith("blob:"):
+                    urls.add(s)
+
+    return sorted(urls)
+
+
 def handle(review_url: str, headless: bool = True) -> List[str]:
     driver = make_driver(headless=headless)
     try:
         driver.get(review_url)
-        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        WebDriverWait(driver, 25).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
         accept_consents(driver, timeout=18)
 
         slow_scroll(driver, steps=10, dy=1200, pause=0.18)
@@ -185,7 +254,8 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
 
         yt = extract_youtube_facade_and_iframes(driver)
         fb = extract_facebook_plugin_only(driver)
+        brde = extract_brde_ard_videos(driver)
 
-        return (yt or []) + (fb or [])
+        return (yt or []) + (fb or []) + (brde or [])
     finally:
         driver.quit()

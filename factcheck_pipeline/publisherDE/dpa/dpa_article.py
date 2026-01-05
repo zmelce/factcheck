@@ -62,7 +62,7 @@ def extract_teaser_from_html(html: str) -> str:
     return ""
 
 
-def _merge_teaser(teaser: str, body: str) -> str:
+def merge_teaser(teaser: str, body: str) -> str:
     teaser = clean_lines(teaser or "")
     body = clean_lines(body or "")
 
@@ -93,7 +93,7 @@ def extract_with_readability(html: str) -> Tuple[str, str]:
     body = cut_at_stop_phrases(body)
 
     teaser = extract_teaser_from_html(html)
-    body = _merge_teaser(teaser, body)
+    body = merge_teaser(teaser, body)
 
     return title, body
 
@@ -117,7 +117,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
         text = clean_lines(soup.get_text("\n", strip=True))
         text = cut_at_stop_phrases(text)
         teaser = extract_teaser_from_html(html)
-        return title, _merge_teaser(teaser, text)
+        return title, merge_teaser(teaser, text)
 
     for tag in container.find_all(["script", "style", "noscript"]):
         tag.decompose()
@@ -132,7 +132,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
     body = cut_at_stop_phrases(body)
 
     teaser = extract_teaser_from_html(html)
-    body = _merge_teaser(teaser, body)
+    body = merge_teaser(teaser, body)
 
     return title, body
 

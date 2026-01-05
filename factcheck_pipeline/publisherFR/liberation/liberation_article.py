@@ -99,7 +99,7 @@ def extract_with_fallback(html: str) -> Tuple[str, str]:
 
 
 
-def _add_lazyload_forcers(context) -> None:
+def add_lazyload_forcers(context) -> None:
     context.add_init_script(
         """
         (() => {
@@ -134,7 +134,7 @@ def fetch_html_with_playwright(url: str, headless: bool = True, timeout_ms: int 
             viewport={"width": 1400, "height": 900},
             device_scale_factor=2,
         )
-        _add_lazyload_forcers(context)
+        add_lazyload_forcers(context)
         page = context.new_page()
 
         try:
@@ -169,7 +169,7 @@ def fetch_html_with_playwright(url: str, headless: bool = True, timeout_ms: int 
 
 
 
-def _domain(url: str) -> str:
+def domain(url: str) -> str:
     try:
         return (urlparse(url).netloc or "").lower()
     except Exception:
@@ -201,7 +201,7 @@ def fetch_and_extract(url: str, timeout: int = 30, headless: bool = True) -> dic
     needs_pw = (
         (html is None)
         or (len(body) < 200)
-        or (_domain(url).endswith("liberation.fr") and len(body) < 800)
+        or (domain(url).endswith("liberation.fr") and len(body) < 800)
     )
 
     if needs_pw:

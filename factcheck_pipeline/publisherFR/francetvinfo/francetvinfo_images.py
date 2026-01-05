@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".avif")  # we accept avif too; will save as-is
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".avif")
 BODY_SEL = "div.c-body"
 
 
@@ -189,7 +189,7 @@ CONSENT_TEXTS = [
     "Reject all",
     "Reject All",
     "Continue without consent",
-    "J'accepte",  # occasionally the site flips to accept to proceed
+    "J'accepte",
     "Accepter",
 ]
 

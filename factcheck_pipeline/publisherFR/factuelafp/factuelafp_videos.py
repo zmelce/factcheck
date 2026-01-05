@@ -156,7 +156,7 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
     try:
         driver.get(review_url)
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        slow_scroll(driver, steps=12)  # nudge lazy embeds
+        slow_scroll(driver, steps=12)
 
         yt, dm, ult, raw = scrape_in_factuel_block(driver)
 

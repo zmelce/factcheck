@@ -64,7 +64,7 @@ def sanitize_provider_url(u: str) -> str:
         path = sp.path
         if ("instagram.com/p/" in u or "instagram.com/reel/" in u) and not path.endswith("/"):
             path += "/"
-        return urlunsplit((sp.scheme, sp.netloc, path, urlencode(qs), ""))  # drop fragments
+        return urlunsplit((sp.scheme, sp.netloc, path, urlencode(qs), ""))
     except Exception:
         return u
 
@@ -116,7 +116,7 @@ def make_driver(headless: bool = True):
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
 
-def _click_first(driver, by, sel) -> bool:
+def click_first(driver, by, sel) -> bool:
     try:
         els = driver.find_elements(by, sel)
         if not els: return False
@@ -132,21 +132,21 @@ def _click_first(driver, by, sel) -> bool:
         pass
     return False
 
-def _try_plain_dom_consent(driver) -> bool:
+def try_plain_dom_consent(driver) -> bool:
     for t in CONSENT_TEXTS:
         xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-        if _click_first(driver, By.XPATH, xp): return True
+        if click_first(driver, By.XPATH, xp): return True
     for t in CONSENT_TEXTS:
         xp = f"//*[self::a or self::span][normalize-space()='{t}' or contains(., '{t}')]"
-        if _click_first(driver, By.XPATH, xp): return True
+        if click_first(driver, By.XPATH, xp): return True
     return False
 
-def _try_iframe_consent(driver) -> bool:
+def try_iframe_consent(driver) -> bool:
     frames = driver.find_elements(By.TAG_NAME, "iframe")
     for fr in frames:
         try:
             driver.switch_to.frame(fr)
-            if _try_plain_dom_consent(driver):
+            if try_plain_dom_consent(driver):
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
@@ -156,7 +156,7 @@ def _try_iframe_consent(driver) -> bool:
             continue
     return False
 
-def _try_didomi_shadow_consent(driver) -> bool:
+def try_didomi_shadow_consent(driver) -> bool:
     js = """
     const TEXTS = arguments[0];
     function searchShadow(root) {
@@ -190,9 +190,9 @@ def _try_didomi_shadow_consent(driver) -> bool:
 def accept_all_consents(driver, timeout=18) -> bool:
     end = time.time() + timeout
     while time.time() < end:
-        if _try_plain_dom_consent(driver): return True
-        if _try_iframe_consent(driver):    return True
-        if _try_didomi_shadow_consent(driver): return True
+        if try_plain_dom_consent(driver): return True
+        if try_iframe_consent(driver):    return True
+        if try_didomi_shadow_consent(driver): return True
         time.sleep(0.4)
     return False
 
@@ -237,7 +237,7 @@ def extract_ultimedia_iframes(driver):
 
 _FEATURE_VIDEO_PAT = re.compile(r"(video|hls|player|mixed[_-]?media)", re.I)
 
-def _b64json_decode(s: str) -> dict:
+def b64json_decode(s: str) -> dict:
     try:
         u = unquote(s)
         if "%3D" in u or "%2F" in u or "%2B" in u:
@@ -249,7 +249,7 @@ def _b64json_decode(s: str) -> dict:
     except Exception:
         return {}
 
-def _looks_like_video(features: dict) -> bool:
+def looks_like_video(features: dict) -> bool:
     if not isinstance(features, dict):
         return False
     stack = [features]
@@ -265,7 +265,7 @@ def _looks_like_video(features: dict) -> bool:
                 if isinstance(v, (dict, list)): stack.append(v)
     return bool(_FEATURE_VIDEO_PAT.search(" ".join(keys)))
 
-def _tweet_owner_from_features(features: dict) -> str | None:
+def tweet_owner_from_features(features: dict) -> str | None:
     if not isinstance(features, dict): return None
     stack = [features]
     while stack:
@@ -309,14 +309,14 @@ def extract_x_video_links(driver, wait_up_to=12):
                 continue
             features = {}
             if "features" in q and q["features"]:
-                features = _b64json_decode(q["features"][0])
+                features = b64json_decode(q["features"][0])
             if not features:
                 title = (fr.get_attribute("title") or "").lower()
                 if "video" not in title:
                     continue
-            if features and not _looks_like_video(features):
+            if features and not looks_like_video(features):
                 continue
-            owner = _tweet_owner_from_features(features)
+            owner = tweet_owner_from_features(features)
             out.append(build_x_url(tweet_id, owner))
     return out
 
@@ -324,9 +324,9 @@ def extract_x_video_links(driver, wait_up_to=12):
 TIKTOK_CANONICAL_RE = re.compile(r"https?://(?:www\.)?tiktok\.com/@([^/]+)/video/(\d+)", re.I)
 TIKTOK_EMBED_ID_RE  = re.compile(r"/embed/(?:v2/)?(\d+)", re.I)
 
-def _clean_url(u: str) -> str:
+def clean_url(u: str) -> str:
     sp = urlsplit(u)
-    return urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))  # drop query & fragment
+    return urlunsplit((sp.scheme, sp.netloc, sp.path, "", ""))
 
 def extract_tiktok_links(driver):
     found = []
@@ -338,7 +338,7 @@ def extract_tiktok_links(driver):
             if cite:
                 m = TIKTOK_CANONICAL_RE.search(cite)
                 if m:
-                    found.append(_clean_url(m.group(0)))
+                    found.append(clean_url(m.group(0)))
                     continue
             vid = (bq.get_attribute("data-video-id") or "").strip()
             user = (bq.get_attribute("data-unique-id") or "").strip()
@@ -353,9 +353,9 @@ def extract_tiktok_links(driver):
                     if vid and user:
                         found.append(f"https://www.tiktok.com/@{user}/video/{vid}")
                     elif cite:
-                        found.append(_clean_url(cite))
+                        found.append(clean_url(cite))
                     else:
-                        found.append(_clean_url(src))
+                        found.append(clean_url(src))
         except Exception:
             continue
 
@@ -377,7 +377,7 @@ def extract_tiktok_links(driver):
                 if cite:
                     m = TIKTOK_CANONICAL_RE.search(cite)
                     if m:
-                        found.append(_clean_url(m.group(0)))
+                        found.append(clean_url(m.group(0)))
                         continue
                 user = (ancestor.get_attribute("data-unique-id") or "").strip()
             except Exception:
@@ -385,15 +385,15 @@ def extract_tiktok_links(driver):
             if user:
                 found.append(f"https://www.tiktok.com/@{user}/video/{vid}")
             else:
-                found.append(_clean_url(src))
+                found.append(clean_url(src))
         except Exception:
             continue
 
     return dedupe_by_prefix_keep_shortest(found)
 
 
-def _extract_all(page_source: str, driver):
-    SENTINEL_END = None  # kept to match original behavior
+def extract_all(page_source: str, driver):
+    SENTINEL_END = None
 
     yt_urls = set()
     iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='youtube.com/embed'],iframe[src*='youtube-nocookie.com/embed']")
@@ -463,7 +463,7 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
         slow_scroll(driver, steps=18, dy=1600, pause=0.22)
         time.sleep(0.6)
 
-        return _extract_all(driver.page_source or "", driver)
+        return extract_all(driver.page_source or "", driver)
     except Exception:
         return []
     finally:

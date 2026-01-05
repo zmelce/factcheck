@@ -48,7 +48,7 @@ _MENTIONS_COPYRIGHT_RE = re.compile(
     flags=re.I,
 )
 
-def _strip_after_mentions_copyright(html: str) -> str:
+def strip_after_mentions_copyright(html: str) -> str:
     if not html:
         return html
     m = _MENTIONS_COPYRIGHT_RE.search(html)
@@ -57,14 +57,14 @@ def _strip_after_mentions_copyright(html: str) -> str:
     return html[: m.start()].strip()
 
 
-def _clean_lines(text: str) -> str:
-    text = re.sub(r"\u00a0", " ", text)  # nbsp
+def clean_lines(text: str) -> str:
+    text = re.sub(r"\u00a0", " ", text)
     lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
     return "\n".join(lines).strip()
 
 
-def _cut_at_stop_phrases(text: str) -> str:
+def cut_at_stop_phrases(text: str) -> str:
     lower = text.lower()
     cut_idx = None
     for phrase in STOP_PHRASES:
@@ -74,11 +74,11 @@ def _cut_at_stop_phrases(text: str) -> str:
     return text[:cut_idx].strip() if cut_idx is not None else text
 
 
-def _strip_html(s: str) -> str:
+def strip_html(s: str) -> str:
     return BeautifulSoup(s or "", "lxml").get_text(" ", strip=True)
 
 
-def _looks_like_access_denied(html: str) -> bool:
+def looks_like_access_denied(html: str) -> bool:
     if not html:
         return True
     h = html.lower()
@@ -98,7 +98,7 @@ def _looks_like_access_denied(html: str) -> bool:
     return any(n in h for n in needles)
 
 
-def _extract_from_jsonld(soup: BeautifulSoup) -> Tuple[str, str]:
+def extract_from_jsonld(soup: BeautifulSoup) -> Tuple[str, str]:
     best_title = ""
     best_body = ""
 
@@ -139,17 +139,17 @@ def _extract_from_jsonld(soup: BeautifulSoup) -> Tuple[str, str]:
                 t0 = obj.get("headline") or obj.get("name") or ""
                 b0 = obj.get("articleBody") or obj.get("text") or ""
 
-                t0 = _strip_html(str(t0))
-                b0 = _strip_html(str(b0))
+                t0 = strip_html(str(t0))
+                b0 = strip_html(str(b0))
 
                 if len(b0) > len(best_body):
                     best_title = t0 or best_title
                     best_body = b0 or best_body
 
-    return best_title.strip(), _clean_lines(best_body)
+    return best_title.strip(), clean_lines(best_body)
 
 
-def _extract_from_dom(soup: BeautifulSoup) -> Tuple[str, str]:
+def extract_from_dom(soup: BeautifulSoup) -> Tuple[str, str]:
     title = ""
     h1 = soup.find("h1")
     if h1:
@@ -184,12 +184,12 @@ def _extract_from_dom(soup: BeautifulSoup) -> Tuple[str, str]:
         if txt:
             parts.append(txt)
 
-    body = _clean_lines("\n".join(parts))
-    body = _cut_at_stop_phrases(body)
+    body = clean_lines("\n".join(parts))
+    body = cut_at_stop_phrases(body)
     return title.strip(), body
 
 
-def _extract_with_readability(html: str) -> Tuple[str, str]:
+def extract_with_readability(html: str) -> Tuple[str, str]:
     doc = Document(html)
     title = (doc.short_title() or "").strip()
 
@@ -202,12 +202,12 @@ def _extract_with_readability(html: str) -> Tuple[str, str]:
         if txt:
             parts.append(txt)
 
-    body = _clean_lines("\n".join(parts))
-    body = _cut_at_stop_phrases(body)
+    body = clean_lines("\n".join(parts))
+    body = cut_at_stop_phrases(body)
     return title, body
 
 
-def _fetch_html_requests(url: str, timeout: int = 30) -> str:
+def fetch_html_requests(url: str, timeout: int = 30) -> str:
     r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
     if r.status_code == 403:
         raise RuntimeError(f"HTTP 403 (blocked) for {url}")
@@ -215,7 +215,7 @@ def _fetch_html_requests(url: str, timeout: int = 30) -> str:
     return r.text
 
 
-def _click_consent_if_present_playwright(page, timeout: int = 6) -> None:
+def click_consent_if_present_playwright(page, timeout: int = 6) -> None:
     end = time.time() + timeout
     click_sel = "button, input[type='button'], input[type='submit'], a[role='button']"
 
@@ -246,7 +246,7 @@ def _click_consent_if_present_playwright(page, timeout: int = 6) -> None:
         page.wait_for_timeout(250)
 
 
-def _fetch_html_playwright(
+def fetch_html_playwright(
     url: str,
     headless: bool = True,
     timeout: int = 30,
@@ -281,7 +281,7 @@ def _fetch_html_playwright(
                 try:
                     page.goto(warmup_url, wait_until="domcontentloaded", timeout=timeout * 1000)
                     page.wait_for_selector("body", timeout=10_000)
-                    _click_consent_if_present_playwright(page, timeout=6)
+                    click_consent_if_present_playwright(page, timeout=6)
                 except Exception:
                     pass
 
@@ -295,7 +295,7 @@ def _fetch_html_playwright(
             except PlaywrightTimeoutError:
                 pass
 
-            _click_consent_if_present_playwright(page, timeout=8)
+            click_consent_if_present_playwright(page, timeout=8)
 
             try:
                 page.evaluate("window.scrollBy(0, 800);")
@@ -305,7 +305,7 @@ def _fetch_html_playwright(
                 pass
 
             html = page.content() or ""
-            if _looks_like_access_denied(html):
+            if looks_like_access_denied(html):
                 raise RuntimeError(f"Access Denied -> {url}")
 
             return html
@@ -316,7 +316,7 @@ def _fetch_html_playwright(
                 browser.close()
 
 
-def _is_afp_faktencheck(url: str) -> bool:
+def is_afp_faktencheck(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     return host.endswith("faktencheck.afp.com") or host.endswith("afp.com")
 
@@ -332,10 +332,10 @@ def fetch_and_extract(
     html = ""
     used_playwright = False
 
-    is_afp = _is_afp_faktencheck(url)
+    is_afp = is_afp_faktencheck(url)
 
     if is_afp and playwright_primary_for_afp:
-        html = _fetch_html_playwright(
+        html = fetch_html_playwright(
             url,
             headless=headless,
             timeout=timeout,
@@ -344,51 +344,51 @@ def fetch_and_extract(
         used_playwright = True
     else:
         try:
-            html = _fetch_html_requests(url, timeout=timeout)
-            if _looks_like_access_denied(html):
+            html = fetch_html_requests(url, timeout=timeout)
+            if looks_like_access_denied(html):
                 raise RuntimeError(f"Access Denied -> {url}")
         except Exception as e:
             if playwright_fallback and ("403" in str(e) or "Access Denied" in str(e)):
                 warmup = "https://faktencheck.afp.com/" if is_afp else None
-                html = _fetch_html_playwright(url, headless=headless, timeout=timeout, warmup_url=warmup)
+                html = fetch_html_playwright(url, headless=headless, timeout=timeout, warmup_url=warmup)
                 used_playwright = True
             else:
                 raise
 
-    html = _strip_after_mentions_copyright(html)
+    html = strip_after_mentions_copyright(html)
 
     soup = BeautifulSoup(html, "lxml")
 
-    t1, b1 = _extract_from_jsonld(soup)
+    t1, b1 = extract_from_jsonld(soup)
     if len(b1) >= 400:
         return {"url": url, "title": t1, "content": b1}
 
-    t2, b2 = _extract_from_dom(soup)
+    t2, b2 = extract_from_dom(soup)
     if len(b2) >= len(b1):
         t_best, b_best = (t2 or t1), b2
     else:
         t_best, b_best = (t1 or t2), b1
 
     if len(b_best) < 300:
-        t3, b3 = _extract_with_readability(html)
+        t3, b3 = extract_with_readability(html)
         if len(b3) > len(b_best):
             t_best, b_best = (t3 or t_best), b3
 
     if playwright_fallback and not used_playwright and len(b_best) < 250:
         try:
             warmup = "https://faktencheck.afp.com/" if is_afp else None
-            html2 = _fetch_html_playwright(url, headless=headless, timeout=timeout, warmup_url=warmup)
+            html2 = fetch_html_playwright(url, headless=headless, timeout=timeout, warmup_url=warmup)
 
-            html2 = _strip_after_mentions_copyright(html2)
+            html2 = strip_after_mentions_copyright(html2)
 
             soup2 = BeautifulSoup(html2, "lxml")
 
-            tt1, bb1 = _extract_from_jsonld(soup2)
-            tt2, bb2 = _extract_from_dom(soup2)
+            tt1, bb1 = extract_from_jsonld(soup2)
+            tt2, bb2 = extract_from_dom(soup2)
 
             cand_title, cand_body = (tt2 or tt1), (bb2 if len(bb2) >= len(bb1) else bb1)
             if len(cand_body) < 300:
-                tt3, bb3 = _extract_with_readability(html2)
+                tt3, bb3 = extract_with_readability(html2)
                 if len(bb3) > len(cand_body):
                     cand_title, cand_body = (tt3 or cand_title), bb3
 

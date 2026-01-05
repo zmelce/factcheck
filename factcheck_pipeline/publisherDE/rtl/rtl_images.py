@@ -1,4 +1,3 @@
-
 import os, re, time, hashlib
 from urllib.parse import urlsplit
 
@@ -36,6 +35,7 @@ def ext_priority(u: str) -> int:
 
 def infer_width_from_url(u: str) -> int:
     m = (
+        re.search(r"/(\d{3,4})/[^/]+\.\w+$", u) or
         re.search(r"/fit-in/(\d+)x", u) or
         re.search(r"/(\d{3,4})x\d{2,4}/", u) or
         re.search(r"[\W_](\d{3,4})w(?:[\W_]|$)", u)
@@ -47,8 +47,8 @@ def canonical_key(u: str) -> str:
     path = parts.path
 
     path = re.sub(r"/fit-in/\d+x\d+/?", "/", path, flags=re.I)
-
     path = re.sub(r"/\d{2,4}x\d{2,4}/", "/", path, flags=re.I)
+    path = re.sub(r"(/img/\d+/\d+/[^/]+)/\d{2,4}/", r"\1/", path, flags=re.I)
 
     dirpath, fname = os.path.split(path)
     if fname:
@@ -76,79 +76,181 @@ JS_EXTRACT_FIGURES = """
   const abs = (u) => { try { return new URL(u, location.href).href } catch { return null } };
 
   function inferWidth(u) {
-    let m = u.match(/\\/fit-in\\/(\\d+)x/) || u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/) || u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
+    let m = u.match(/\\/(\\d{3,4})\\/[^\\/]+\\.\\w+$/)
+         || u.match(/\\/fit-in\\/(\\d+)x/)
+         || u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/)
+         || u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
     return m ? parseInt(m[1], 10) : 0;
   }
+
   function parseSrcset(ss) {
     const out = [];
     (ss || '').split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
       const bits = part.split(/\\s+/);
       const u = abs(bits[0]);
       let w = 0;
-      if (bits.length > 1 && /\\d+w$/.test(bits[1])) { try { w = parseInt(bits[1], 10) } catch { w = 0 } }
-      if (u) out.push({url: u, w});
+      if (bits.length > 1 && /\\d+w$/.test(bits[1])) {
+        try { w = parseInt(bits[1], 10) } catch { w = 0 }
+      }
+      if (u) out.push({url: u, w: w || inferWidth(u)});
     });
     return out;
   }
 
-  // likely article content roots
+  function extractFromImg(im, cap, source) {
+    const results = [];
+    const ss = im.getAttribute('srcset') || im.getAttribute('data-srcset');
+    if (ss) {
+      for (const it of parseSrcset(ss)) {
+        if (ok(it.url)) results.push({url: it.url, w: it.w, cap, source});
+      }
+    }
+    for (const attr of ['currentSrc', 'src', 'data-src', 'data-original']) {
+      let u = attr === 'currentSrc' ? im.currentSrc : im.getAttribute(attr);
+      u = u ? abs(u) : null;
+      if (u && ok(u)) { results.push({url: u, w: inferWidth(u), cap, source}); break; }
+    }
+    return results;
+  }
+
+  /* ---------------------------------------------------------------
+     Skip cover/hero images: if div[class*='default_root'] exists,
+     only process <figure> elements that appear AFTER it in DOM order.
+     The div is NOT a parent of the figures — it's a preceding sibling
+     or element at the same level.
+     --------------------------------------------------------------- */
   const bodies = Array.from(document.querySelectorAll(
-    "article, main, .article, .article-body, .entry-content, .post-content, .content, body"
+    "article, main, .article, .article-body, .entry-content, .post-content, .content, " +
+    "[class*='Article'], [class*='article'], body"
   ));
   const body = bodies.find(b => b && b.querySelector("figure, img")) || document.body;
+
+  const marker = document.querySelector("div[class*='default_root']");
 
   const images = [];
 
   for (const fig of body.querySelectorAll("figure")) {
-    const cap = clean((fig.querySelector("figcaption") || {}).textContent || "");
+    /* If the marker exists, skip any figure that comes before it in DOM */
+    if (marker && (marker.compareDocumentPosition(fig) & Node.DOCUMENT_POSITION_PRECEDING)) {
+      continue;
+    }
+    let cap = '';
+    let copyright = '';
+    const rtlCapEl  = fig.querySelector("[class*='Picture_caption']");
+    const rtlCopyEl = fig.querySelector("[class*='Picture_copyright']");
+    const genericFC = fig.querySelector("figcaption");
+    if (rtlCapEl) {
+      cap = clean(rtlCapEl.textContent);
+      copyright = rtlCopyEl ? clean(rtlCopyEl.textContent) : '';
+    } else if (genericFC) {
+      cap = clean(genericFC.textContent);
+    }
+    const fullCap = copyright ? (cap + ' \\u00a9 ' + copyright) : cap;
 
-    // picture/source/srcset
     for (const pic of fig.querySelectorAll("picture")) {
       for (const src of pic.querySelectorAll("source")) {
         const ss = src.getAttribute("srcset") || src.getAttribute("data-srcset");
-        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
+        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url))
+          images.push({url: it.url, w: it.w, cap: fullCap, source: 'figure'});
       }
       const im = pic.querySelector("img");
-      if (im) {
-        let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-        if (!u) {
-          const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-          if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-        } else { u = abs(u); if (ok(u)) images.push({url: u, w: inferWidth(u), cap}); }
-      }
+      if (im) images.push(...extractFromImg(im, fullCap, 'figure'));
     }
 
-    // noscript fallback inside figure
     for (const ns of fig.querySelectorAll("noscript")) {
       const tmp = document.createElement("div");
       tmp.innerHTML = ns.innerHTML;
       const im = tmp.querySelector("img");
-      if (im) {
-        const u = abs(im.getAttribute("src"));
-        if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-      }
+      if (im) images.push(...extractFromImg(im, fullCap, 'figure'));
     }
 
-    // plain <img> inside figure
     for (const im of fig.querySelectorAll("img")) {
       if (im.closest("picture")) continue;
-      let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-      if (u) { u = abs(u); if (ok(u)) images.push({url: u, w: inferWidth(u), cap}); }
-      else {
-        const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-      }
+      images.push(...extractFromImg(im, fullCap, 'figure'));
     }
 
-    // sometimes the clickable <a> has the full image URL
     const a = fig.querySelector("a[href]");
     if (a) {
       const u = abs(a.getAttribute("href"));
-      if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
+      if (ok(u)) images.push({url: u, w: inferWidth(u), cap: fullCap, source: 'figure'});
     }
   }
 
   return { images };
+}
+"""
+
+JS_FIND_EMBEDS = """
+() => {
+  const embeds = [];
+  let idx = 0;
+
+  function tag(el, platform, url, caption) {
+    if (el.closest('[data-sm-embed-id]')) return;
+    const id = 'sm-embed-' + (idx++);
+    el.setAttribute('data-sm-embed-id', id);
+    embeds.push({ id, platform, url, caption });
+  }
+
+  const marker = document.querySelector("div[class*='default_root']");
+  function beforeMarker(el) {
+    return marker && (marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING);
+  }
+
+  /* On rtl.de, social embeds are rendered as iframes.
+     Screenshot the iframe (or its parent wrapper) directly. */
+
+  /* --- Instagram --- */
+  for (const el of document.querySelectorAll("iframe[src*='instagram.com']")) {
+    if (beforeMarker(el)) continue;
+    const src = el.getAttribute('src') || '';
+    const m = src.match(/instagram\\.com\\/(?:p|reel)\\/([A-Za-z0-9_-]+)/);
+    const permalink = m ? 'https://www.instagram.com/p/' + m[1] + '/' : src;
+    const wrapper = el.parentElement || el;
+    tag(wrapper, 'instagram', permalink, '[Instagram ' + permalink + ']');
+  }
+
+  /* --- Twitter / X --- */
+  for (const el of document.querySelectorAll(
+    "iframe[src*='twitter.com'], iframe[src*='platform.x.com']"
+  )) {
+    if (beforeMarker(el)) continue;
+    const src = el.getAttribute('src') || '';
+    const wrapper = el.parentElement || el;
+    tag(wrapper, 'twitter', src, '[Twitter ' + src + ']');
+  }
+
+  /* --- Facebook --- */
+  for (const el of document.querySelectorAll("iframe[src*='facebook.com']")) {
+    if (beforeMarker(el)) continue;
+    const src = el.getAttribute('src') || '';
+    const wrapper = el.parentElement || el;
+    tag(wrapper, 'facebook', src, '[Facebook ' + src + ']');
+  }
+
+  /* --- TikTok --- */
+  for (const el of document.querySelectorAll("iframe[src*='tiktok.com']")) {
+    if (beforeMarker(el)) continue;
+    const src = el.getAttribute('src') || '';
+    const wrapper = el.parentElement || el;
+    tag(wrapper, 'tiktok', src, '[TikTok ' + src + ']');
+  }
+
+  /* --- YouTube --- */
+  for (const el of document.querySelectorAll(
+    "iframe[src*='youtube.com/embed'], iframe[data-src*='youtube.com/embed']"
+  )) {
+    if (beforeMarker(el)) continue;
+    const src = el.getAttribute('src') || el.getAttribute('data-src') || '';
+    const m = src.match(/\\/embed\\/([a-zA-Z0-9_-]+)/);
+    if (m) {
+      const vidUrl = 'https://www.youtube.com/watch?v=' + m[1];
+      const wrapper = el.parentElement || el;
+      tag(wrapper, 'youtube', vidUrl, '[YouTube ' + vidUrl + ']');
+    }
+  }
+
+  return embeds;
 }
 """
 
@@ -286,7 +388,7 @@ def wait_network_quiet(page, timeout_ms=6000):
         pass
 
 
-def scrape_article_figures(article_url: str, out_dir="correctiv_assets", headless=True):
+def scrape_article_figures(article_url: str, out_dir="rtl_assets", headless=True):
     os.makedirs(out_dir, exist_ok=True)
     rows = []
 
@@ -320,7 +422,8 @@ def scrape_article_figures(article_url: str, out_dir="correctiv_assets", headles
 
             try:
                 page.wait_for_function(
-                    "() => !!document.querySelector('article, .entry-content, .post-content, body')",
+                    "() => !!document.querySelector('article, .entry-content, .post-content, "
+                    "[class*=\"Article\"], body')",
                     timeout=20000
                 )
             except PWTimeout:
@@ -381,7 +484,44 @@ def scrape_article_figures(article_url: str, out_dir="correctiv_assets", headles
                     fpath = os.path.join(out_dir, fname)
                     with open(fpath, "wb") as f:
                         f.write(r.body())
-                    rows.append({"image_url": img, "caption": cap, "path": fname})
+                    rows.append({
+                        "image_url": img,
+                        "caption": cap,
+                        "path": fname,
+                    })
+                except Exception:
+                    continue
+
+            embed_list = page.evaluate(JS_FIND_EMBEDS)
+
+            for emb in embed_list:
+                embed_id = emb.get("id", "")
+                platform = emb.get("platform", "unknown")
+                embed_url = emb.get("url", "")
+                caption = emb.get("caption", "")
+
+                try:
+                    loc = page.locator(f"[data-sm-embed-id='{embed_id}']")
+                    if loc.count() == 0:
+                        continue
+
+                    loc.first.scroll_into_view_if_needed(timeout=5000)
+                    page.wait_for_timeout(1500)
+
+                    h = hashlib.md5(
+                        (embed_id + embed_url).encode("utf-8")
+                    ).hexdigest()[:12]
+                    fname = f"{prefix}_{platform}_{h}.png"
+                    fpath = os.path.join(out_dir, fname)
+
+                    loc.first.screenshot(path=fpath, timeout=15000)
+
+                    if os.path.exists(fpath) and os.path.getsize(fpath) > 0:
+                        rows.append({
+                            "image_url": embed_url,
+                            "caption": caption,
+                            "path": fname,
+                        })
                 except Exception:
                     continue
 

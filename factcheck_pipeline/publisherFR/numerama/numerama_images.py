@@ -47,7 +47,7 @@ def pick_largest_from_srcset(srcset, base):
             best_u, best_w = u, w
     return best_u
 
-def _clean_text(t): return re.sub(r"\s+", " ", (t or "").strip())
+def clean_text(t): return re.sub(r"\s+", " ", (t or "").strip())
 def get_ext(u: str) -> str: return os.path.splitext(urlsplit(u).path.lower())[1]
 
 def safe_slug(s, length=64):
@@ -82,7 +82,7 @@ def download_image(url, dest_dir, prefix):
 
 _TWEET_STATUS_RE = re.compile(r"https?://(www\.)?(x|twitter)\.com/[^/]+/status/(\d+)")
 
-def _tweet_id_from_url(u: str) -> str | None:
+def tweet_id_from_url(u: str) -> str | None:
     if not u: return None
     try:
         q = parse_qs(urlsplit(u).query)
@@ -95,7 +95,7 @@ def _tweet_id_from_url(u: str) -> str | None:
         pass
     return None
 
-def _build_embed_from_id(tweet_id: str, lang="fr", width_px=550) -> str:
+def build_embed_from_id(tweet_id: str, lang="fr", width_px=550) -> str:
     return f"https://platform.twitter.com/embed/Tweet.html?id={tweet_id}&theme=light&lang={lang}&dnt=true&width={width_px}px"
 
 def capture_tweet_screenshot(any_tweet_ref: str, dest_dir: str, prefix: str, width: int = 550, timeout_ms: int = 45000):
@@ -104,10 +104,10 @@ def capture_tweet_screenshot(any_tweet_ref: str, dest_dir: str, prefix: str, wid
         return None
 
     os.makedirs(dest_dir, exist_ok=True)
-    tid = _tweet_id_from_url(any_tweet_ref)
+    tid = tweet_id_from_url(any_tweet_ref)
     if not tid:
         tid = hashlib.md5(any_tweet_ref.encode("utf-8")).hexdigest()[:12]
-    embed_url = _build_embed_from_id(tid, width_px=width)
+    embed_url = build_embed_from_id(tid, width_px=width)
 
     out_path = os.path.join(dest_dir, f"{tid}.png")
     try:
@@ -134,7 +134,7 @@ def capture_tweet_screenshot(any_tweet_ref: str, dest_dir: str, prefix: str, wid
         print(f"[tweet] failed to capture screenshot: {e}")
         return None
 
-def _is_numerama_main_container(tag: Tag) -> bool:
+def is_numerama_main_container(tag: Tag) -> bool:
     if not isinstance(tag, Tag) or tag.name != "div":
         return False
     classes = set(tag.get("class", []))
@@ -144,13 +144,13 @@ def _is_numerama_main_container(tag: Tag) -> bool:
         return True
     return False
 
-def _find_container(soup: BeautifulSoup) -> Tag | None:
-    c = soup.find(_is_numerama_main_container)
+def find_container(soup: BeautifulSoup) -> Tag | None:
+    c = soup.find(is_numerama_main_container)
     if c:
         return c
     return soup.select_one("div.article-content.post-content")
 
-def _best_img_in_figure(fig: Tag, base: str):
+def best_img_in_figure(fig: Tag, base: str):
     for pic in fig.find_all("picture"):
         for src in pic.find_all("source"):
             ss = src.get("srcset") or src.get("data-srcset")
@@ -187,7 +187,7 @@ def _best_img_in_figure(fig: Tag, base: str):
             return href
     return None
 
-def _find_tweet_ref_in_figure(fig: Tag, base: str) -> str | None:
+def find_tweet_ref_in_figure(fig: Tag, base: str) -> str | None:
 
     for ifr in fig.find_all("iframe"):
         src = ifr.get("src") or ifr.get("data-src")
@@ -206,7 +206,7 @@ def _find_tweet_ref_in_figure(fig: Tag, base: str) -> str | None:
     if any_id_el:
         tid = str(any_id_el.get("data-tweet-id")).strip()
         if tid.isdigit():
-            return _build_embed_from_id(tid)
+            return build_embed_from_id(tid)
 
     return None
 
@@ -224,7 +224,7 @@ def extract_assets_numerama(article_url):
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url
-    container = _find_container(soup) or soup
+    container = find_container(soup) or soup
 
     out, seen = [], set()
 
@@ -232,11 +232,11 @@ def extract_assets_numerama(article_url):
         cap = ""
         fc = fig.find("figcaption")
         if fc:
-            cap = _clean_text(fc.get_text(" "))
+            cap = clean_text(fc.get_text(" "))
 
-        tref = _find_tweet_ref_in_figure(fig, base)
+        tref = find_tweet_ref_in_figure(fig, base)
         if tref:
-            tid = _tweet_id_from_url(tref) or ""
+            tid = tweet_id_from_url(tref) or ""
             key = f"tweet:{tid or tref}"
             if key in seen:
                 continue
@@ -244,7 +244,7 @@ def extract_assets_numerama(article_url):
             out.append({"kind": "tweet", "tweet_ref": tref, "tweet_id": tid, "caption": cap})
             continue
 
-        img_url = _best_img_in_figure(fig, base)
+        img_url = best_img_in_figure(fig, base)
         if img_url:
             ext = get_ext(img_url)
             if ext and ext not in IMG_EXT:
@@ -300,7 +300,7 @@ def handle(review_url: str, location_info: str):
         out_dir=location_info,
         download=True,
         store_json=True,
-        screenshot_tweets=True  # needs Playwright installed
+        screenshot_tweets=True
     )
     out_df =pd.DataFrame(out_list)
     if not out_df.empty:

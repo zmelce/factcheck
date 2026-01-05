@@ -58,10 +58,10 @@ def infer_width_from_url(u: str) -> int:
 def canonical_key(u: str) -> str:
     parts = urlsplit(u)
     path = parts.path
-    path = re.sub(r"/t/[^/]+", "", path, flags=re.I)                # /t/<token>
-    path = re.sub(r"/v\d+(?=/|$)", "", path, flags=re.I)            # /v6
-    path = re.sub(r"/w\d{2,4}(?=/|$)", "", path, flags=re.I)        # /w960
-    path = re.sub(r"/r\d+(?:\.\d+)?(?=/|$)", "", path, flags=re.I)  # /r1.7778
+    path = re.sub(r"/t/[^/]+", "", path, flags=re.I)
+    path = re.sub(r"/v\d+(?=/|$)", "", path, flags=re.I)
+    path = re.sub(r"/w\d{2,4}(?=/|$)", "", path, flags=re.I)
+    path = re.sub(r"/r\d+(?:\.\d+)?(?=/|$)", "", path, flags=re.I)
     path = re.sub(r"/{2,}", "/", path)
     path = re.sub(r"(/[^/]+?)-\d{2,4}x\d{2,4}(\.[a-z0-9]{2,4})$", r"\1\2", path, flags=re.I)
     return f"{parts.netloc}{path}".lower()
@@ -102,7 +102,7 @@ def make_driver(headless=True):
     opts.add_argument(f"--user-agent={UA}")
     return webdriver.Chrome(options=opts)
 
-def _click_first(driver, by, sel) -> bool:
+def click_first(driver, by, sel) -> bool:
     try:
         els = driver.find_elements(by, sel)
         if not els:
@@ -124,11 +124,11 @@ def accept_consents(driver, timeout=15) -> bool:
     while time.time() < end:
         for t in CONSENT_TEXTS:
             xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-            if _click_first(driver, By.XPATH, xp):
+            if click_first(driver, By.XPATH, xp):
                 return True
         for t in CONSENT_TEXTS:
             xp = f"//*[self::a or self::span][normalize-space()='{t}' or contains(., '{t}')]"
-            if _click_first(driver, By.XPATH, xp):
+            if click_first(driver, By.XPATH, xp):
                 return True
         frames = driver.find_elements(By.TAG_NAME, "iframe")
         for fr in frames:
@@ -136,7 +136,7 @@ def accept_consents(driver, timeout=15) -> bool:
                 driver.switch_to.frame(fr)
                 for t in CONSENT_TEXTS:
                     xp = f"//button[normalize-space()='{t}' or contains(., '{t}')]"
-                    if _click_first(driver, By.XPATH, xp):
+                    if click_first(driver, By.XPATH, xp):
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()
@@ -249,7 +249,7 @@ def extract_images_and_captions(driver) -> list[dict]:
             if srcset:
                 for u, w in parse_srcset(srcset):
                     if not u: continue
-                    if "gps-visual-widget" in u:  # guard for the excluded image
+                    if "gps-visual-widget" in u:
                         continue
                     candidates.append({"url": u, "w": w or infer_width_from_url(u), "caption": cap})
 

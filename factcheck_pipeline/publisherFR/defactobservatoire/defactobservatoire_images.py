@@ -28,7 +28,7 @@ def text_clean(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 
-def _extract_from_figures(scope: Tag, base_url: str, seen: set) -> list[dict]:
+def extract_from_figures(scope: Tag, base_url: str, seen: set) -> list[dict]:
     out = []
     for fig in scope.select("figure"):
         caption = ""
@@ -58,7 +58,7 @@ def _extract_from_figures(scope: Tag, base_url: str, seen: set) -> list[dict]:
             out.append({"image_url": u, "caption": caption})
     return out
 
-def _extract_from_wwitem_image(scope: Tag, base_url: str, seen: set) -> list[dict]:
+def extract_from_wwitem_image(scope: Tag, base_url: str, seen: set) -> list[dict]:
     out = []
     for div in scope.select("div.ww-item.image"):
         for p in div.find_all("p"):
@@ -89,8 +89,8 @@ def extract_from_html(html: str, base_url: str):
     scope = soup.select_one("div.defacto-fact-check-body") or soup
 
     out, seen = [], set()
-    out.extend(_extract_from_figures(scope, base_url, seen))
-    out.extend(_extract_from_wwitem_image(scope, base_url, seen))
+    out.extend(extract_from_figures(scope, base_url, seen))
+    out.extend(extract_from_wwitem_image(scope, base_url, seen))
     return out
 
 def extract_images_with_context(article_url: str):

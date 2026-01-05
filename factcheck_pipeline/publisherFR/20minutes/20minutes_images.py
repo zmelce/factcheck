@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; 20mn-img-scraper/1.3)"}
-IMG_EXT  = (".jpg", ".jpeg", ".png", ".webp")  # SAME as your previous working code
+IMG_EXT  = (".jpg", ".jpeg", ".png", ".webp")
 SCOPE_SEL = "article.o-paper__content figure.c-media div.c-media__content"
 
 
@@ -39,7 +39,7 @@ def pick_largest_from_srcset(srcset, base):
             best_u, best_w = u, w
     return best_u
 
-def _clean_text(t):
+def clean_text(t):
     return re.sub(r"\s+", " ", (t or "").strip())
 
 def get_ext(u: str) -> str:
@@ -62,8 +62,8 @@ def extract_images_with_captions(article_url):
     base = r.url
     boxes = soup.select(SCOPE_SEL)
 
-    candidates = []       # raw URLs (like before)
-    captions_by_box = []  # parallel list of captions (from the box's figure)
+    candidates = []
+    captions_by_box = []
 
     for box in boxes:
         cap = ""
@@ -71,7 +71,7 @@ def extract_images_with_captions(article_url):
         if fig:
             fc = fig.find("figcaption")
             if fc:
-                cap = _clean_text(fc.get_text(" "))
+                cap = clean_text(fc.get_text(" "))
 
         for pic in box.find_all("picture"):
             for src in pic.find_all("source"):
@@ -162,7 +162,7 @@ def enrich_dataframe_with_images_list(article_url="reviewURL",
     images = []
 
     if article_url:
-        items = extract_images_with_captions(article_url)  # [{"image_url","caption"}...]
+        items = extract_images_with_captions(article_url)
         if download and items:
             prefix = safe_slug(article_url)
             for it in items:

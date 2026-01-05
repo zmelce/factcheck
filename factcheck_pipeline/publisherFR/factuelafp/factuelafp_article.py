@@ -111,10 +111,10 @@ def extract_from_jsonld(soup: BeautifulSoup) -> Tuple[str, str]:
 
         try:
             payload = json.loads(raw)
-        except Exception:
+        except:
             try:
                 payload = json.loads(unescape(raw))
-            except Exception:
+            except:
                 continue
 
         stack: List[Any] = [payload]
@@ -228,19 +228,19 @@ def click_consent_if_present_playwright(page, timeout: int = 6) -> None:
                         el = loc.first
                         try:
                             el.scroll_into_view_if_needed(timeout=500)
-                        except Exception:
+                        except:
                             pass
                         try:
                             el.click(timeout=900)
-                        except Exception:
+                        except:
                             try:
                                 el.click(timeout=900, force=True)
-                            except Exception:
+                            except:
                                 continue
 
                         page.wait_for_timeout(200)
                         return
-                except Exception:
+                except:
                     continue
 
         page.wait_for_timeout(250)
@@ -282,7 +282,7 @@ def fetch_html_playwright(
                     page.goto(warmup_url, wait_until="domcontentloaded", timeout=timeout * 1000)
                     page.wait_for_selector("body", timeout=10_000)
                     click_consent_if_present_playwright(page, timeout=6)
-                except Exception:
+                except:
                     pass
 
             resp = page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
@@ -298,10 +298,10 @@ def fetch_html_playwright(
             click_consent_if_present_playwright(page, timeout=8)
 
             try:
-                page.evaluate("window.scrollBy(0, 800);")
+                page.mouse.wheel(0, 800)
                 page.wait_for_timeout(150)
                 page.evaluate("window.scrollTo(0, 0);")
-            except Exception:
+            except:
                 pass
 
             html = page.content() or ""
@@ -394,7 +394,7 @@ def fetch_and_extract(
 
             if len(cand_body) > len(b_best):
                 t_best, b_best = cand_title, cand_body
-        except Exception:
+        except:
             pass
 
     return {"url": url, "title": (t_best or "").strip(), "content": (b_best or "").strip()}

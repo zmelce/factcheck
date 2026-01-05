@@ -138,7 +138,7 @@ def extract_links(review_url: str) -> List[str]:
         for _, links in buckets.items():
             all_links.extend(links)
         return sorted(set(all_links))
-    except Exception:
+    except:
         return []
 
 def handle(review_url: str,headless: bool = True) -> List[str]:

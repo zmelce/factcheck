@@ -1,8 +1,8 @@
-
 import os, re, time, hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 import pandas as pd
+from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 UA = (
@@ -22,8 +22,7 @@ CONSENT_TEXTS = [
 
 
 def clean(s: str | None) -> str:
-    import re as _re
-    return _re.sub(r"\s+", " ", (s or "")).strip()
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
 def get_ext(u: str) -> str:
     return os.path.splitext(urlsplit(u).path.lower())[1]
@@ -36,120 +35,109 @@ def ext_priority(u: str) -> int:
     if e == ".avif": return 1
     return 0
 
+def ok_ext(u: str) -> bool:
+    if not u:
+        return False
+    return any(u.lower().split("?")[0].endswith(e) for e in IMG_EXT)
+
 def infer_width_from_url(u: str) -> int:
-    import re as _re
-    m = (_re.search(r"/fit-in/(\d+)x", u)
-         or _re.search(r"[\W_](\d{3,4})w(?:[\W_]|$)", u)
-         or _re.search(r"/(\d{3,4})x\d{2,4}/", u))
+    m = (re.search(r"/fit-in/(\d+)x", u)
+         or re.search(r"[\W_](\d{3,4})w(?:[\W_]|$)", u)
+         or re.search(r"/(\d{3,4})x\d{2,4}/", u))
     return int(m.group(1)) if m else 0
 
 def canonical_key(u: str) -> str:
     parts = urlsplit(u)
     path = parts.path
-
     if "/styles/" in path and "/public/" in path:
         try:
             path = path.split("/public/", 1)[1]
             path = "/" + path if not path.startswith("/") else path
-        except Exception:
+        except:
             pass
-
     path = re.sub(r"(/[^/]+?)-\d{2,4}x\d{2,4}(\.[a-z0-9]{2,4})$", r"\1\2", path, flags=re.I)
-
     return f"{parts.netloc}{path}".lower()
 
 def caption_key(s: str) -> str:
     return clean(s).lower()
 
 def safe_slug(s: str, n=64) -> str:
-    import re as _re
-    s = _re.sub(r"https?://", "", s or "")
-    s = _re.sub(r"[^\w.-]+", "_", s).strip("._")
+    s = re.sub(r"https?://", "", s or "")
+    s = re.sub(r"[^\w.-]+", "_", s).strip("._")
     return s[-n:] if len(s) > n else (s or "article")
 
+def parse_srcset_py(srcset: str, base_url: str) -> list[dict]:
+    results = []
+    for part in (srcset or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split()
+        if not bits:
+            continue
+        u = urljoin(base_url, bits[0])
+        w = 0
+        if len(bits) > 1 and bits[1].endswith("w"):
+            try:
+                w = int(bits[1][:-1])
+            except ValueError:
+                pass
+        if not w:
+            w = infer_width_from_url(u)
+        results.append({"url": u, "w": w})
+    return results
 
-JS_EXTRACT_WRAPPER = """
-() => {
-  const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
-  const ok = u => !!u && ALLOWED.some(e => u.toLowerCase().split('?')[0].endsWith(e));
-  const abs = (u) => { try { return new URL(u, location.href).href } catch { return null } };
-  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
 
-  function parseSrcset(ss) {
-    const out = [];
-    (ss || '').split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
-      const bits = part.split(/\\s+/);
-      const u = abs(bits[0]);
-      let w = 0;
-      if (bits.length > 1 && /\\d+w$/.test(bits[1])) { try { w = parseInt(bits[1], 10) } catch { w = 0 } }
-      if (u) out.push({url: u, w});
-    });
-    return out;
-  }
+def extract_wrapper_images(page, article_url: str) -> list[dict]:
+    items = []
+    nodes = page.query_selector_all(".wrapper-image")
 
-  function inferWidth(u) {
-    let m = u.match(/\\/fit-in\\/(\\d+)x/) || u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/) || u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
-    return m ? parseInt(m[1], 10) : 0;
-  }
+    for node in nodes:
+        cap_el = node.query_selector(".legend, figcaption")
+        caption = clean(cap_el.inner_text() if cap_el else "")
 
-  const nodes = Array.from(document.querySelectorAll(".wrapper-image"));
-  const items = [];
+        seen = set()
+        candidates = []
 
-  for (const node of nodes) {
-    const cap = clean((node.querySelector(".legend, figcaption") || {}).textContent || "");
+        for img in node.query_selector_all("img"):
+            current_src = img.evaluate("el => el.currentSrc || ''")
+            u = current_src or img.get_attribute("src") or img.get_attribute("data-src") or img.get_attribute("data-original") or ""
+            if u:
+                u = urljoin(article_url, u)
+                if ok_ext(u) and u not in seen:
+                    seen.add(u)
+                    w = infer_width_from_url(u) or int(img.get_attribute("width") or 0)
+                    candidates.append({"url": u, "w": w})
 
-    // Collect candidate URLs from img[src], img[srcset], noscript
-    const urls = [];
+            srcset = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+            for c in parse_srcset_py(srcset, article_url):
+                if ok_ext(c["url"]) and c["url"] not in seen:
+                    seen.add(c["url"])
+                    candidates.append(c)
 
-    // imgs
-    for (const im of node.querySelectorAll("img")) {
-      let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-      const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset") || "";
-      if (u) {
-        u = abs(u);
-        if (ok(u)) urls.push({url: u, w: inferWidth(u) || (parseInt(im.getAttribute('width')||'0',10) || 0)});
-      }
-      if (ss) {
-        for (const it of parseSrcset(ss)) {
-          if (ok(it.url)) urls.push({url: it.url, w: it.w || inferWidth(it.url)});
-        }
-      }
-    }
+        for ns in node.query_selector_all("noscript"):
+            inner = ns.inner_html()
+            if not inner:
+                continue
+            soup = BeautifulSoup(inner, "html.parser")
+            img_tag = soup.find("img")
+            if not img_tag:
+                continue
+            srcset = img_tag.get("srcset", "")
+            for c in parse_srcset_py(srcset, article_url):
+                if ok_ext(c["url"]) and c["url"] not in seen:
+                    seen.add(c["url"])
+                    candidates.append(c)
+            u = urljoin(article_url, img_tag.get("src", ""))
+            if ok_ext(u) and u not in seen:
+                seen.add(u)
+                w = int(img_tag.get("width") or 0) or infer_width_from_url(u)
+                candidates.append({"url": u, "w": w})
 
-    // noscript fallbacks with img
-    for (const ns of node.querySelectorAll("noscript")) {
-      const tmp = document.createElement("div");
-      tmp.innerHTML = ns.innerHTML;
-      const im = tmp.querySelector("img");
-      if (im) {
-        const u = abs(im.getAttribute("src") || "");
-        if (ok(u)) {
-          let w = 0;
-          const ss = im.getAttribute("srcset") || "";
-          if (ss) {
-            for (const it of parseSrcset(ss)) {
-              if (ok(it.url)) urls.push({url: it.url, w: it.w || inferWidth(it.url)});
-            }
-          }
-          w = parseInt(im.getAttribute("width")||"0",10) || inferWidth(u);
-          urls.push({url: u, w});
-        }
-      }
-    }
+        if candidates:
+            items.append({"caption": caption, "candidates": candidates})
 
-    // filter and keep unique strings at this stage
-    const seen = new Set();
-    const uniq = [];
-    for (const c of urls) {
-      if (c && c.url && !seen.has(c.url)) { seen.add(c.url); uniq.push(c); }
-    }
-
-    if (uniq.length) items.push({ caption: cap, candidates: uniq });
-  }
-
-  return { items };
-}
-"""
+    return items
 
 
 def try_dismiss_consent(page) -> bool:
@@ -160,7 +148,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
         try:
             loc = page.locator(f"button:has-text('{t}')")
@@ -168,7 +156,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
     for fr in page.frames:
         for t in CONSENT_TEXTS:
@@ -178,7 +166,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
             try:
                 loc = fr.locator(f"button:has-text('{t}')")
@@ -186,7 +174,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
     return False
 
@@ -309,12 +297,11 @@ def scrape_article_wrapper_images(article_url: str, out_dir="wrapper_assets", he
             wait_network_quiet(page, 7000)
             wait_for_images_settled(page, 12000)
 
-            payload = page.evaluate(JS_EXTRACT_WRAPPER)
-            items = payload.get("items", []) if payload else []
+            items = extract_wrapper_images(page, article_url)
 
             def score(c):
-                w = int(c.get("w") or 0) or infer_width_from_url(c.get("url",""))
-                return (w, ext_priority(c.get("url","")))
+                w = int(c.get("w") or 0) or infer_width_from_url(c.get("url", ""))
+                return (w, ext_priority(c.get("url", "")))
 
             best_by_asset = {}
             for it in items:
@@ -365,7 +352,7 @@ def scrape_article_wrapper_images(article_url: str, out_dir="wrapper_assets", he
                     with open(fpath, "wb") as f:
                         f.write(r.body())
                     rows.append({"image_url": img, "caption": cap, "path": fname})
-                except Exception:
+                except:
                     continue
 
         finally:
@@ -387,4 +374,3 @@ def handle(review_url: str, location_info="wrapper_assets", headless=False):
             return items
 
     return items
-

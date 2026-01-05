@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import tempfile
@@ -145,9 +146,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -169,15 +170,15 @@ def accept_consents(driver, timeout=15) -> bool:
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 try: driver.switch_to.default_content()
-                except Exception: pass
+                except: pass
         time.sleep(0.35)
     return False
 
 def slow_scroll(driver, steps=26, dy=1600, pause=0.22):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 def element_is_in_blocked_ancestor(tag) -> bool:
@@ -241,7 +242,7 @@ def collect_images_from_article_body(html: str, base_url: str):
             w = 0
             try:
                 w = int(im.get("width") or "0")
-            except Exception:
+            except:
                 w = 0
 
             items.append({"url": src_abs, "w": w, "caption": caption})
@@ -253,7 +254,7 @@ def collect_images_from_article_body(html: str, base_url: str):
                     continue
                 items.append({"url": u_abs, "w": ww or infer_width_from_url(u_abs), "caption": caption})
 
-        except Exception:
+        except:
             continue
 
     seen = set()
@@ -316,7 +317,7 @@ def download_and_save(img_url: str, referer: str, out_dir: str, prefix: str) -> 
             with open(fpath, "wb") as f:
                 f.write(r.content)
             return fname
-    except Exception:
+    except:
         return None
 
 def screenshot_tweet_iframes(driver, article_url: str, out_dir: str, prefix: str):
@@ -333,7 +334,7 @@ def screenshot_tweet_iframes(driver, article_url: str, out_dir: str, prefix: str
             name = f"tweet_{tid or idx}_{hashlib.md5(f'{article_url}#tweet#{idx}'.encode('utf-8')).hexdigest()[:12]}.png"
             fr.screenshot(os.path.join(out_dir, name))
             rows.append({"image_url": "tweet", "caption": "", "path": name})
-        except Exception:
+        except:
             continue
     return rows
 
@@ -353,7 +354,7 @@ def scrape_article_images_and_tweets(article_url: str, out_dir="wp_assets", head
                     (By.CSS_SELECTOR, "#article_body_content.et_pb_row.et_pb_row_1_tb_body.hyphen")
                 )
             )
-        except Exception:
+        except:
             pass
 
         slow_scroll(driver, steps=26, dy=1600, pause=0.2)

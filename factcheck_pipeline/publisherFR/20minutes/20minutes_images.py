@@ -56,7 +56,7 @@ def extract_images_with_captions(article_url):
 
     try:
         soup = BeautifulSoup(r.text, "lxml")
-    except Exception:
+    except:
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url

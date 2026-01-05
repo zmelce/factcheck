@@ -7,6 +7,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -56,8 +57,12 @@ def is_visible(el, min_w=40, min_h=40) -> bool:
     try:
         rect = el.rect or {}
         w, h = rect.get("width", 0), rect.get("height", 0)
-        return w >= min_w and h >= min_h and el.is_displayed()
-    except Exception:
+        if not (w >= min_w):
+            return False
+        if not (h >= min_h):
+            return False
+        return el.is_displayed()
+    except:
         return False
 
 
@@ -76,9 +81,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -99,10 +104,10 @@ def try_consent(driver, timeout=12) -> bool:
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 try:
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     pass
                 continue
         time.sleep(0.4)
@@ -124,7 +129,7 @@ def make_driver(headless: bool = True):
 
 def slow_scroll(driver, steps=24, dy=1500, pause=0.25):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
@@ -181,7 +186,7 @@ def extract_visible_video_links(url: str, headless: bool = True) -> List[str]:
             ancestor = None
             try:
                 ancestor = fr.find_element(By.XPATH, "ancestor::blockquote[contains(@class,'tiktok-embed')]")
-            except Exception:
+            except:
                 pass
             cu = canon_tiktok_from_iframe(src, ancestor_blockquote=ancestor)
             if cu and cu not in seen:
@@ -196,5 +201,5 @@ def extract_visible_video_links(url: str, headless: bool = True) -> List[str]:
 def handle(review_url: str):
     try:
         return extract_visible_video_links(review_url, headless=True)
-    except Exception:
+    except:
         return []

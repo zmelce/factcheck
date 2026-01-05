@@ -113,9 +113,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -140,27 +140,26 @@ def accept_consents(driver, timeout=15) -> bool:
                         driver.switch_to.default_content()
                         return True
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 try:
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     pass
         time.sleep(0.35)
     return False
 
 def slow_scroll(driver, steps=22, dy=1500, pause=0.22):
+    from selenium.webdriver.common.action_chains import ActionChains
+    ac = ActionChains(driver)
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ac.scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
-def element_has_ancestor_css(driver, el, css: str) -> bool:
+def element_has_ancestor_css(el, xpath: str) -> bool:
     try:
-        return driver.execute_script(
-            "const el = arguments[0], sel = arguments[1]; return !!(el && el.closest(sel));",
-            el, css
-        ) or False
-    except Exception:
+        return len(el.find_elements(By.XPATH, xpath)) > 0
+    except:
         return False
 
 def is_excluded_gps_widget_image(img_el) -> bool:
@@ -174,23 +173,21 @@ def is_excluded_gps_widget_image(img_el) -> bool:
         needle = "gregor peter schmitz with the letters gps"
         if needle in title or needle in alt:
             return True
-    except Exception:
+    except:
         pass
     return False
 
-def is_inside_teaser_embed(driver, el) -> bool:
+def is_inside_teaser_embed(el) -> bool:
+    xpath = (
+        "ancestor::article["
+        "  contains(concat(' ',@class,' '),' teaser--embed ')"
+        "  or @data-teaser-type='embed'"
+        "  or @data-testid='paid-teaser'"
+        "]"
+    )
     try:
-        return driver.execute_script(
-            """
-            const el = arguments[0];
-            if (!el) return false;
-            return !!el.closest(
-              'article.teaser.teaser--embed, article.teaser--embed, article.teaser[data-teaser-type="embed"], article[data-teaser-type="embed"], article[data-testid="paid-teaser"]'
-            );
-            """,
-            el
-        ) or False
-    except Exception:
+        return len(el.find_elements(By.XPATH, xpath)) > 0
+    except:
         return False
 
 def find_article_root(driver):
@@ -207,9 +204,9 @@ def extract_images_and_captions(driver) -> list[dict]:
 
     for im in imgs:
         try:
-            if element_has_ancestor_css(driver, im, ".teaser-absatz.columns"):
+            if element_has_ancestor_css(im, "ancestor::*[contains(concat(' ',@class,' '),' teaser-absatz ') and contains(concat(' ',@class,' '),' columns ')]"):
                 continue
-            if is_inside_teaser_embed(driver, im):
+            if is_inside_teaser_embed(im):
                 continue
             if is_excluded_gps_widget_image(im):
                 continue
@@ -220,22 +217,21 @@ def extract_images_and_captions(driver) -> list[dict]:
             cap = title or alt
 
             try:
-                cap2 = driver.execute_script(
-                    """
-                    const im = arguments[0];
-                    const fig = im.closest('figure');
-                    if (fig) {
-                      const fc = fig.querySelector('figcaption');
-                      if (fc) return fc.textContent.trim();
-                    }
-                    const legend = im.closest('.wrapper-image')?.querySelector('.legend');
-                    return legend ? legend.textContent.trim() : '';
-                    """,
-                    im
-                ) or ""
+                cap2 = ""
+                try:
+                    fig = im.find_element(By.XPATH, "ancestor::figure[1]")
+                    fc = fig.find_element(By.CSS_SELECTOR, "figcaption")
+                    cap2 = fc.text.strip()
+                except:
+                    try:
+                        wrapper = im.find_element(By.XPATH, "ancestor::*[contains(concat(' ',@class,' '),' wrapper-image ')][1]")
+                        legend = wrapper.find_element(By.CSS_SELECTOR, ".legend")
+                        cap2 = legend.text.strip()
+                    except:
+                        pass
                 if cap2:
                     cap = clean(cap2)
-            except Exception:
+            except:
                 pass
 
             candidates = []
@@ -259,7 +255,7 @@ def extract_images_and_captions(driver) -> list[dict]:
                 if not u or u in seen: continue
                 seen.add(u)
                 items.append(c)
-        except Exception:
+        except:
             continue
     return items
 
@@ -325,7 +321,7 @@ def download_and_save(img_url: str, referer: str, out_dir: str, prefix: str) -> 
             with open(fpath, "wb") as f:
                 f.write(r.content)
             return fname
-    except Exception:
+    except:
         return None
 
 def screenshot_iframe(driver, iframe_el, article_url: str, out_dir: str, prefix: str, idx: int) -> str | None:
@@ -341,7 +337,7 @@ def screenshot_iframe(driver, iframe_el, article_url: str, out_dir: str, prefix:
         path = os.path.join(out_dir, name)
         iframe_el.screenshot(path)
         return name
-    except Exception:
+    except:
         return None
 
 
@@ -359,7 +355,7 @@ def scrape_article_images_and_tweets(article_url: str, out_dir="stern_assets", h
             WebDriverWait(driver, 8).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "div.sub-header.informations"))
             )
-        except Exception:
+        except:
             pass
 
         slow_scroll(driver, steps=22, dy=1600, pause=0.2)

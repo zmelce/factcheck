@@ -42,8 +42,10 @@ def is_visible(locator, min_w=40, min_h=40) -> bool:
     try:
         box = locator.bounding_box()
         if not box: return False
-        return box.get("width",0) >= min_w and box.get("height",0) >= min_h
-    except Exception:
+        if not (box.get("width",0) >= min_w):
+            return False
+        return box.get("height",0) >= min_h
+    except:
         return False
 
 
@@ -94,21 +96,21 @@ def try_dismiss_consent(page) -> bool:
         try:
             loc = page.get_by_role("button", name=re.compile(t, re.I))
             if loc.count() > 0: loc.first.click(timeout=1200); page.wait_for_timeout(300); return True
-        except Exception: pass
+        except: pass
         try:
             loc = page.locator(f"button:has-text('{t}')")
             if loc.count() > 0: loc.first.click(timeout=1200); page.wait_for_timeout(300); return True
-        except Exception: pass
+        except: pass
     for fr in page.frames:
         for t in CONSENT_TEXTS:
             try:
                 loc = fr.get_by_role("button", name=re.compile(t, re.I))
                 if loc.count() > 0: loc.first.click(timeout=1200); page.wait_for_timeout(300); return True
-            except Exception: pass
+            except: pass
             try:
                 loc = fr.locator(f"button:has-text('{t}')")
                 if loc.count() > 0: loc.first.click(timeout=1200); page.wait_for_timeout(300); return True
-            except Exception: pass
+            except: pass
     return False
 
 def scroll_until_stable(page, max_scrolls=40, step=1400, idle_ms=350):
@@ -145,7 +147,7 @@ def tweet_iframe_has_video(fr) -> bool:
         if fr.locator("[data-testid='videoComponent']").count() > 0: return True
         if fr.locator("img[src*='ext_tw_video_thumb'], [style*='ext_tw_video_thumb']").count() > 0: return True
         if fr.get_by_role("button", name=re.compile(r"Play|Watch|Lire|Regarder", re.I)).count() > 0: return True
-    except Exception:
+    except:
         pass
     return False
 
@@ -173,7 +175,7 @@ def extract_links_on_page(page) -> Dict[str, List[str]]:
                         cu2 = add_query(f"https://www.youtube.com/embed/{m.group(1)}", {"autoplay":"1"})
                         if cu2 not in seen:
                             seen.add(cu2); results["youtube"].append(cu2)
-        except Exception:
+        except:
             pass
 
     tw_ifr = scope.locator("iframe[src*='platform.twitter.com/embed/Tweet.html']")
@@ -204,7 +206,7 @@ def extract_links_on_page(page) -> Dict[str, List[str]]:
     for k, v in list(results.items()):
         v = sorted(set(v))
         if v: results[k] = v
-        else: results.pop(k, None)
+        else: del results[k]
     return results
 
 def extract_visible_video_and_tweet_links(url: str, headless: bool = True) -> List[str]:
@@ -249,5 +251,5 @@ def extract_visible_video_and_tweet_links(url: str, headless: bool = True) -> Li
 def handle(review_url: str) -> List[str]:
     try:
         return extract_visible_video_and_tweet_links(review_url, headless=True)
-    except Exception:
+    except:
         return []

@@ -54,7 +54,7 @@ def click_first_button_with_text(driver, texts) -> bool:
                 time.sleep(0.08)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
     return False
 
@@ -73,52 +73,49 @@ def accept_consents(driver, timeout: int = 18) -> None:
                         driver.switch_to.default_content()
                         return
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     try:
                         driver.switch_to.default_content()
-                    except Exception:
+                    except:
                         pass
             tried_iframes = True
         time.sleep(0.25)
 
 
 def slow_scroll(driver, steps: int = 10, dy: int = 1400, pause: float = 0.18) -> None:
+    from selenium.webdriver.common.action_chains import ActionChains
+    ac = ActionChains(driver)
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ac.scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
 def wait_any_data_renditions(driver, timeout: int = 35) -> bool:
-    js = """
-      return Array.from(document.querySelectorAll('[data-renditions]'))
-                  .some(n => (n.getAttribute('data-renditions')||'').length > 10);
-    """
     try:
-        WebDriverWait(driver, timeout).until(lambda d: d.execute_script(js) is True)
+        WebDriverWait(driver, timeout).until(
+            lambda d: any(
+                len(el.get_attribute("data-renditions") or "") > 10
+                for el in d.find_elements(By.CSS_SELECTOR, "[data-renditions]")
+            )
+        )
         return True
     except TimeoutException:
         return False
 
 
 def extract_progressive_js(driver) -> Optional[str]:
-    js = r"""
-    const nodes = document.querySelectorAll("[data-renditions]");
-    for (const n of nodes) {
-      const raw = n.getAttribute("data-renditions") || "";
-      if (!raw) continue;
-      const txt = (new DOMParser()).parseFromString(raw, "text/html").documentElement.textContent || "";
-      try {
-        const data = JSON.parse(txt);
-        const url = data?.progressive?.url || "";
-        if (url) return url;
-      } catch(e) {}
-    }
-    return null;
-    """
-    try:
-        return driver.execute_script(js)
-    except Exception:
-        return None
+    for el in driver.find_elements(By.CSS_SELECTOR, "[data-renditions]"):
+        raw = el.get_attribute("data-renditions") or ""
+        if not raw:
+            continue
+        try:
+            data = json.loads(unescape(raw))
+            url = data.get("progressive", {}).get("url", "")
+            if url:
+                return url
+        except:
+            continue
+    return None
 
 
 def extract_progressive_regex(html: str) -> Optional[str]:
@@ -129,7 +126,7 @@ def extract_progressive_regex(html: str) -> Optional[str]:
             url = data.get("progressive", {}).get("url")
             if url:
                 return url
-        except Exception:
+        except:
             continue
     return None
 
@@ -144,7 +141,7 @@ def sniff_first_mp4(driver) -> Optional[str]:
                 url = params.get(key, {}).get("url")
                 if url and url.lower().endswith(".mp4"):
                     return url
-        except Exception:
+        except:
             continue
     return None
 

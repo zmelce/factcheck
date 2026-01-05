@@ -7,6 +7,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -29,7 +30,7 @@ def make_driver(headless: bool = True):
 
 def slow_scroll(driver, steps: int = 10, dy: int = 1200, pause: float = 0.18):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
@@ -120,7 +121,7 @@ def canonicalize_ultimedia(urls: List[str]) -> List[str]:
 def scrape_inside_defacto(driver) -> tuple[list[str], list[str], list[str], list[str]]:
     try:
         container = driver.find_element(By.CSS_SELECTOR, "div.defacto-fact-check-body")
-    except Exception:
+    except:
         return [], [], [], []
 
     html = container.get_attribute("outerHTML") or ""
@@ -160,7 +161,7 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
 
         flat = yt + dm + ult + raws
         return sorted(set(flat))
-    except Exception:
+    except:
         return []
     finally:
         driver.quit()

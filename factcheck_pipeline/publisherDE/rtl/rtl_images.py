@@ -1,7 +1,8 @@
 import os, re, time, hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 import pandas as pd
+from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 UA = (
@@ -19,8 +20,7 @@ CONSENT_TEXTS = [
 
 
 def clean(s: str | None) -> str:
-    import re as _re
-    return _re.sub(r"\s+", " ", (s or "")).strip()
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
 def get_ext(u: str) -> str:
     return os.path.splitext(urlsplit(u).path.lower())[1]
@@ -32,6 +32,11 @@ def ext_priority(u: str) -> int:
     if e == ".webp": return 2
     if e == ".avif": return 1
     return 0
+
+def ok_ext(u: str) -> bool:
+    if not u:
+        return False
+    return any(u.lower().split("?")[0].endswith(e) for e in IMG_EXT)
 
 def infer_width_from_url(u: str) -> int:
     m = (
@@ -45,214 +50,202 @@ def infer_width_from_url(u: str) -> int:
 def canonical_key(u: str) -> str:
     parts = urlsplit(u)
     path = parts.path
-
     path = re.sub(r"/fit-in/\d+x\d+/?", "/", path, flags=re.I)
     path = re.sub(r"/\d{2,4}x\d{2,4}/", "/", path, flags=re.I)
     path = re.sub(r"(/img/\d+/\d+/[^/]+)/\d{2,4}/", r"\1/", path, flags=re.I)
-
     dirpath, fname = os.path.split(path)
     if fname:
         fname = re.sub(r"-(\d{2,4}x\d{2,4})(\.[a-z0-9]{2,4}$)", r"\2", fname, flags=re.I)
         fname = re.sub(r"-(scaled)(\.[a-z0-9]{2,4}$)", r"\2", fname, flags=re.I)
         path = (dirpath + "/" + fname).replace("//", "/")
-
     return f"{parts.netloc}{path}"
 
 def caption_key(s: str) -> str:
     return clean(s).lower()
 
 def safe_slug(s: str, n=64) -> str:
-    import re as _re
-    s = _re.sub(r"https?://", "", s or "")
-    s = _re.sub(r"[^\w.-]+", "_", s).strip("._")
+    s = re.sub(r"https?://", "", s or "")
+    s = re.sub(r"[^\w.-]+", "_", s).strip("._")
     return s[-n:] if len(s) > n else (s or "article")
 
+def parse_srcset_py(srcset: str, base_url: str) -> list[dict]:
+    results = []
+    for part in (srcset or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split()
+        if not bits:
+            continue
+        u = urljoin(base_url, bits[0])
+        w = 0
+        if len(bits) > 1 and bits[1].endswith("w"):
+            try:
+                w = int(bits[1][:-1])
+            except ValueError:
+                pass
+        if not w:
+            w = infer_width_from_url(u)
+        results.append({"url": u, "w": w})
+    return results
 
-JS_EXTRACT_FIGURES = """
-() => {
-  const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
-  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const ok = u => !!u && ALLOWED.some(e => u.toLowerCase().split('?')[0].endsWith(e));
-  const abs = (u) => { try { return new URL(u, location.href).href } catch { return null } };
+def extract_from_img(img_el, base_url: str, cap: str) -> list[dict]:
+    results = []
+    ss = img_el.get_attribute("srcset") or img_el.get_attribute("data-srcset") or ""
+    if ss:
+        for c in parse_srcset_py(ss, base_url):
+            if ok_ext(c["url"]):
+                results.append({**c, "cap": cap})
+    for attr in ("currentSrc", "src", "data-src", "data-original"):
+        u = img_el.evaluate("el => el.currentSrc || ''") if attr == "currentSrc" else (img_el.get_attribute(attr) or "")
+        if u:
+            u = urljoin(base_url, u)
+            if ok_ext(u):
+                results.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
+            break
+    return results
 
-  function inferWidth(u) {
-    let m = u.match(/\\/(\\d{3,4})\\/[^\\/]+\\.\\w+$/)
-         || u.match(/\\/fit-in\\/(\\d+)x/)
-         || u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/)
-         || u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
-    return m ? parseInt(m[1], 10) : 0;
-  }
 
-  function parseSrcset(ss) {
-    const out = [];
-    (ss || '').split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
-      const bits = part.split(/\\s+/);
-      const u = abs(bits[0]);
-      let w = 0;
-      if (bits.length > 1 && /\\d+w$/.test(bits[1])) {
-        try { w = parseInt(bits[1], 10) } catch { w = 0 }
-      }
-      if (u) out.push({url: u, w: w || inferWidth(u)});
-    });
-    return out;
-  }
+def extract_figures(page, article_url: str) -> list[dict]:
+    body_selectors = [
+        "article", "main", ".article", ".article-body", ".entry-content",
+        ".post-content", ".content",
+    ]
+    body = None
+    for sel in body_selectors:
+        el = page.query_selector(sel)
+        if el and el.query_selector("figure, img"):
+            body = el
+            break
+    if not body:
+        body = page.query_selector("body")
+    if not body:
+        return []
 
-  function extractFromImg(im, cap, source) {
-    const results = [];
-    const ss = im.getAttribute('srcset') || im.getAttribute('data-srcset');
-    if (ss) {
-      for (const it of parseSrcset(ss)) {
-        if (ok(it.url)) results.push({url: it.url, w: it.w, cap, source});
-      }
-    }
-    for (const attr of ['currentSrc', 'src', 'data-src', 'data-original']) {
-      let u = attr === 'currentSrc' ? im.currentSrc : im.getAttribute(attr);
-      u = u ? abs(u) : null;
-      if (u && ok(u)) { results.push({url: u, w: inferWidth(u), cap, source}); break; }
-    }
-    return results;
-  }
+    marker = page.query_selector("div[class*='default_root']")
+    candidates = []
 
-  /* ---------------------------------------------------------------
-     Skip cover/hero images: if div[class*='default_root'] exists,
-     only process <figure> elements that appear AFTER it in DOM order.
-     The div is NOT a parent of the figures — it's a preceding sibling
-     or element at the same level.
-     --------------------------------------------------------------- */
-  const bodies = Array.from(document.querySelectorAll(
-    "article, main, .article, .article-body, .entry-content, .post-content, .content, " +
-    "[class*='Article'], [class*='article'], body"
-  ));
-  const body = bodies.find(b => b && b.querySelector("figure, img")) || document.body;
+    for fig in body.query_selector_all("figure"):
+        if marker:
+            is_before = marker.evaluate(
+                "(marker, fig) => !!(marker.compareDocumentPosition(fig) & Node.DOCUMENT_POSITION_PRECEDING)",
+                fig
+            )
+            if is_before:
+                continue
 
-  const marker = document.querySelector("div[class*='default_root']");
+        rtl_cap_el = fig.query_selector("[class*='Picture_caption']")
+        rtl_copy_el = fig.query_selector("[class*='Picture_copyright']")
+        generic_fc = fig.query_selector("figcaption")
 
-  const images = [];
+        if rtl_cap_el:
+            cap = clean(rtl_cap_el.inner_text())
+            copyright_txt = clean(rtl_copy_el.inner_text()) if rtl_copy_el else ""
+        elif generic_fc:
+            cap = clean(generic_fc.inner_text())
+            copyright_txt = ""
+        else:
+            cap = ""
+            copyright_txt = ""
 
-  for (const fig of body.querySelectorAll("figure")) {
-    /* If the marker exists, skip any figure that comes before it in DOM */
-    if (marker && (marker.compareDocumentPosition(fig) & Node.DOCUMENT_POSITION_PRECEDING)) {
-      continue;
-    }
-    let cap = '';
-    let copyright = '';
-    const rtlCapEl  = fig.querySelector("[class*='Picture_caption']");
-    const rtlCopyEl = fig.querySelector("[class*='Picture_copyright']");
-    const genericFC = fig.querySelector("figcaption");
-    if (rtlCapEl) {
-      cap = clean(rtlCapEl.textContent);
-      copyright = rtlCopyEl ? clean(rtlCopyEl.textContent) : '';
-    } else if (genericFC) {
-      cap = clean(genericFC.textContent);
-    }
-    const fullCap = copyright ? (cap + ' \\u00a9 ' + copyright) : cap;
+        full_cap = f"{cap} \u00a9 {copyright_txt}" if copyright_txt else cap
 
-    for (const pic of fig.querySelectorAll("picture")) {
-      for (const src of pic.querySelectorAll("source")) {
-        const ss = src.getAttribute("srcset") || src.getAttribute("data-srcset");
-        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url))
-          images.push({url: it.url, w: it.w, cap: fullCap, source: 'figure'});
-      }
-      const im = pic.querySelector("img");
-      if (im) images.push(...extractFromImg(im, fullCap, 'figure'));
-    }
+        for pic in fig.query_selector_all("picture"):
+            for src in pic.query_selector_all("source"):
+                ss = src.get_attribute("srcset") or src.get_attribute("data-srcset") or ""
+                for c in parse_srcset_py(ss, article_url):
+                    if ok_ext(c["url"]):
+                        candidates.append({**c, "cap": full_cap})
+            img = pic.query_selector("img")
+            if img:
+                candidates.extend(extract_from_img(img, article_url, full_cap))
 
-    for (const ns of fig.querySelectorAll("noscript")) {
-      const tmp = document.createElement("div");
-      tmp.innerHTML = ns.innerHTML;
-      const im = tmp.querySelector("img");
-      if (im) images.push(...extractFromImg(im, fullCap, 'figure'));
-    }
+        for ns in fig.query_selector_all("noscript"):
+            inner = ns.inner_html()
+            if not inner:
+                continue
+            soup = BeautifulSoup(inner, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag:
+                u = urljoin(article_url, img_tag.get("src", ""))
+                if ok_ext(u):
+                    candidates.append({"url": u, "w": infer_width_from_url(u), "cap": full_cap})
 
-    for (const im of fig.querySelectorAll("img")) {
-      if (im.closest("picture")) continue;
-      images.push(...extractFromImg(im, fullCap, 'figure'));
-    }
+        for img in fig.query_selector_all("img"):
+            if img.evaluate("el => !!el.closest('picture')"):
+                continue
+            candidates.extend(extract_from_img(img, article_url, full_cap))
 
-    const a = fig.querySelector("a[href]");
-    if (a) {
-      const u = abs(a.getAttribute("href"));
-      if (ok(u)) images.push({url: u, w: inferWidth(u), cap: fullCap, source: 'figure'});
-    }
-  }
+        a = fig.query_selector("a[href]")
+        if a:
+            href = urljoin(article_url, a.get_attribute("href") or "")
+            if ok_ext(href):
+                candidates.append({"url": href, "w": infer_width_from_url(href), "cap": full_cap})
 
-  return { images };
-}
-"""
+    return candidates
 
-JS_FIND_EMBEDS = """
-() => {
-  const embeds = [];
-  let idx = 0;
 
-  function tag(el, platform, url, caption) {
-    if (el.closest('[data-sm-embed-id]')) return;
-    const id = 'sm-embed-' + (idx++);
-    el.setAttribute('data-sm-embed-id', id);
-    embeds.push({ id, platform, url, caption });
-  }
+def find_and_screenshot_embeds(page, article_url: str, out_dir: str, prefix: str) -> list[dict]:
+    marker = page.query_selector("div[class*='default_root']")
+    rows = []
+    seen_urls = set()
 
-  const marker = document.querySelector("div[class*='default_root']");
-  function beforeMarker(el) {
-    return marker && (marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING);
-  }
+    platform_selectors = [
+        ("instagram", "iframe[src*='instagram.com']"),
+        ("twitter", "iframe[src*='twitter.com'], iframe[src*='platform.x.com']"),
+        ("facebook", "iframe[src*='facebook.com']"),
+        ("tiktok", "iframe[src*='tiktok.com']"),
+        ("youtube", "iframe[src*='youtube.com/embed'], iframe[data-src*='youtube.com/embed']"),
+    ]
 
-  /* On rtl.de, social embeds are rendered as iframes.
-     Screenshot the iframe (or its parent wrapper) directly. */
+    for platform, selector in platform_selectors:
+        for iframe in page.query_selector_all(selector):
+            if marker:
+                is_before = marker.evaluate(
+                    "(marker, el) => !!(marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING)",
+                    iframe
+                )
+                if is_before:
+                    continue
 
-  /* --- Instagram --- */
-  for (const el of document.querySelectorAll("iframe[src*='instagram.com']")) {
-    if (beforeMarker(el)) continue;
-    const src = el.getAttribute('src') || '';
-    const m = src.match(/instagram\\.com\\/(?:p|reel)\\/([A-Za-z0-9_-]+)/);
-    const permalink = m ? 'https://www.instagram.com/p/' + m[1] + '/' : src;
-    const wrapper = el.parentElement || el;
-    tag(wrapper, 'instagram', permalink, '[Instagram ' + permalink + ']');
-  }
+            src = iframe.get_attribute("src") or iframe.get_attribute("data-src") or ""
 
-  /* --- Twitter / X --- */
-  for (const el of document.querySelectorAll(
-    "iframe[src*='twitter.com'], iframe[src*='platform.x.com']"
-  )) {
-    if (beforeMarker(el)) continue;
-    const src = el.getAttribute('src') || '';
-    const wrapper = el.parentElement || el;
-    tag(wrapper, 'twitter', src, '[Twitter ' + src + ']');
-  }
+            if platform == "instagram":
+                m = re.search(r"instagram\.com/(?:p|reel)/([A-Za-z0-9_-]+)", src)
+                embed_url = f"https://www.instagram.com/p/{m.group(1)}/" if m else src
+            elif platform == "youtube":
+                m = re.search(r"/embed/([a-zA-Z0-9_-]+)", src)
+                embed_url = f"https://www.youtube.com/watch?v={m.group(1)}" if m else src
+            else:
+                embed_url = src
 
-  /* --- Facebook --- */
-  for (const el of document.querySelectorAll("iframe[src*='facebook.com']")) {
-    if (beforeMarker(el)) continue;
-    const src = el.getAttribute('src') || '';
-    const wrapper = el.parentElement || el;
-    tag(wrapper, 'facebook', src, '[Facebook ' + src + ']');
-  }
+            if embed_url in seen_urls:
+                continue
+            seen_urls.add(embed_url)
 
-  /* --- TikTok --- */
-  for (const el of document.querySelectorAll("iframe[src*='tiktok.com']")) {
-    if (beforeMarker(el)) continue;
-    const src = el.getAttribute('src') || '';
-    const wrapper = el.parentElement || el;
-    tag(wrapper, 'tiktok', src, '[TikTok ' + src + ']');
-  }
+            try:
+                wrapper = iframe.evaluate_handle("el => el.parentElement || el")
+                wrapper_el = wrapper.as_element()
+                target = wrapper_el if wrapper_el else iframe
+                target.scroll_into_view_if_needed(timeout=5000)
+                page.wait_for_timeout(1500)
 
-  /* --- YouTube --- */
-  for (const el of document.querySelectorAll(
-    "iframe[src*='youtube.com/embed'], iframe[data-src*='youtube.com/embed']"
-  )) {
-    if (beforeMarker(el)) continue;
-    const src = el.getAttribute('src') || el.getAttribute('data-src') || '';
-    const m = src.match(/\\/embed\\/([a-zA-Z0-9_-]+)/);
-    if (m) {
-      const vidUrl = 'https://www.youtube.com/watch?v=' + m[1];
-      const wrapper = el.parentElement || el;
-      tag(wrapper, 'youtube', vidUrl, '[YouTube ' + vidUrl + ']');
-    }
-  }
+                h = hashlib.md5(embed_url.encode("utf-8")).hexdigest()[:12]
+                fname = f"{prefix}_{platform}_{h}.png"
+                fpath = os.path.join(out_dir, fname)
 
-  return embeds;
-}
-"""
+                target.screenshot(path=fpath, timeout=15000)
+
+                if os.path.exists(fpath) and os.path.getsize(fpath) > 0:
+                    rows.append({
+                        "image_url": embed_url,
+                        "caption": f"[{platform.title()} {embed_url}]",
+                        "path": fname,
+                    })
+            except:
+                continue
+
+    return rows
 
 
 def try_dismiss_consent(page) -> bool:
@@ -263,7 +256,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
         try:
             loc = page.locator(f"button:has-text('{t}')")
@@ -271,7 +264,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
     for fr in page.frames:
         for t in CONSENT_TEXTS:
@@ -281,7 +274,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
             try:
                 loc = fr.locator(f"button:has-text('{t}')")
@@ -289,7 +282,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
     return False
 
@@ -317,12 +310,11 @@ def add_lazyload_forcers(context):
     """)
 
 def route_block_noise(page):
-    import re as _re
-    BLOCK_RE = _re.compile(
+    BLOCK_RE = re.compile(
         r"(doubleclick\.net|googlesyndication\.com|google-analytics\.com|googletagmanager\.com"
         r"|adnxs\.com|criteo\.com|facebook\.net|connect\.facebook\.net|taboola\.com|scorecardresearch\.com"
         r"|outbrain\.com|quantserve\.com|hotjar\.com|tiktokcdn|fonts\.gstatic\.com|fonts\.googleapis\.com)",
-        _re.I
+        re.I
     )
     def route(route):
         req = route.request
@@ -333,7 +325,6 @@ def route_block_noise(page):
     page.route("**/*", route)
 
 def robust_goto(page, url, max_tries=3, base_timeout=45000):
-    from playwright.sync_api import TimeoutError as PWTimeout
     for i in range(max_tries):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=base_timeout)
@@ -349,7 +340,6 @@ def robust_goto(page, url, max_tries=3, base_timeout=45000):
     return False
 
 def scroll_until_stable(page, max_scrolls=40, step=1400, idle_ms=350):
-    from playwright.sync_api import TimeoutError as PWTimeout
     stable_hits = 0
     for _ in range(max_scrolls):
         h = page.evaluate("document.scrollingElement.scrollHeight")
@@ -422,8 +412,7 @@ def scrape_article_figures(article_url: str, out_dir="rtl_assets", headless=True
 
             try:
                 page.wait_for_function(
-                    "() => !!document.querySelector('article, .entry-content, .post-content, "
-                    "[class*=\"Article\"], body')",
+                    "() => !!document.querySelector('article, .entry-content, .post-content, body')",
                     timeout=20000
                 )
             except PWTimeout:
@@ -432,8 +421,7 @@ def scrape_article_figures(article_url: str, out_dir="rtl_assets", headless=True
             wait_network_quiet(page, 7000)
             wait_for_images_settled(page, 12000)
 
-            payload = page.evaluate(JS_EXTRACT_FIGURES)
-            candidates = payload.get("images", [])
+            candidates = extract_figures(page, article_url)
 
             def score(c):
                 w = int(c.get("w") or infer_width_from_url(c["url"]))
@@ -484,46 +472,11 @@ def scrape_article_figures(article_url: str, out_dir="rtl_assets", headless=True
                     fpath = os.path.join(out_dir, fname)
                     with open(fpath, "wb") as f:
                         f.write(r.body())
-                    rows.append({
-                        "image_url": img,
-                        "caption": cap,
-                        "path": fname,
-                    })
-                except Exception:
+                    rows.append({"image_url": img, "caption": cap, "path": fname})
+                except:
                     continue
 
-            embed_list = page.evaluate(JS_FIND_EMBEDS)
-
-            for emb in embed_list:
-                embed_id = emb.get("id", "")
-                platform = emb.get("platform", "unknown")
-                embed_url = emb.get("url", "")
-                caption = emb.get("caption", "")
-
-                try:
-                    loc = page.locator(f"[data-sm-embed-id='{embed_id}']")
-                    if loc.count() == 0:
-                        continue
-
-                    loc.first.scroll_into_view_if_needed(timeout=5000)
-                    page.wait_for_timeout(1500)
-
-                    h = hashlib.md5(
-                        (embed_id + embed_url).encode("utf-8")
-                    ).hexdigest()[:12]
-                    fname = f"{prefix}_{platform}_{h}.png"
-                    fpath = os.path.join(out_dir, fname)
-
-                    loc.first.screenshot(path=fpath, timeout=15000)
-
-                    if os.path.exists(fpath) and os.path.getsize(fpath) > 0:
-                        rows.append({
-                            "image_url": embed_url,
-                            "caption": caption,
-                            "path": fname,
-                        })
-                except Exception:
-                    continue
+            rows.extend(find_and_screenshot_embeds(page, article_url, out_dir, prefix))
 
         finally:
             try:

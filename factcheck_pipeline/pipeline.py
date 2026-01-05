@@ -31,7 +31,7 @@ def remove_empty_dir(path: str) -> None:
     try:
         if os.path.isdir(path) and not os.listdir(path):
             os.rmdir(path)
-    except Exception:
+    except:
         pass
 
 
@@ -252,7 +252,7 @@ def main():
         if pubmods.label_normalize is not None:
             try:
                 label_norm = pubmods.label_normalize(it.review_label_raw)
-            except Exception:
+            except:
                 label_norm = it.review_label_raw
 
         media_obj: Dict[str, Any] = {"images": images, "videos": video_urls}

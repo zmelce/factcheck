@@ -1,4 +1,3 @@
-
 import re
 import time
 from html import unescape
@@ -8,8 +7,10 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import WebDriverException
 
 
@@ -55,13 +56,11 @@ def dm_clean_embed(u: str) -> str | None:
 
 
 CONSENT_TEXTS = [
-    "Tout accepter", "J’accepte", "J'accepte", "Accepter",
+    "Tout accepter", "J'accepte", "J'accepte", "Accepter",
     "Continuer sans consentir", "Continuer sans accepter",
     "Tout refuser", "Refuser tout", "Rejeter",
-    "OK", "J’accept", "J'accept", "I accept (for free)"
+    "OK", "J'accept", "J'accept", "I accept (for free)"
 ]
-
-from selenium.webdriver.chrome.service import Service
 
 CHROMEDRIVER_PATH = "/Users/melce/bin/chromedriver"
 
@@ -69,7 +68,6 @@ def make_driver(headless=True):
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
-
     opts.add_argument("--window-size=1440,1100")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
@@ -77,7 +75,6 @@ def make_driver(headless=True):
     opts.add_argument("--lang=de-DE,de;q=0.9,en;q=0.8")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--remote-debugging-port=0")
-
     service = Service(
         executable_path=CHROMEDRIVER_PATH,
         port=0,
@@ -96,9 +93,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -118,47 +115,50 @@ def try_iframe_consent(driver) -> bool:
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
-        except Exception:
+        except:
             try:
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 pass
             continue
     return False
 
 def try_didomi_shadow_consent(driver) -> bool:
-    js = """
-    const TEXTS = arguments[0];
-    function searchShadow(root) {
-      const tryClick = (el) => { try { el.click(); return true; } catch(e) { return false; } };
-      const nodes = root.querySelectorAll('button, [role="button"], *');
-      for (const n of nodes) {
-        const txt = (n.textContent||'').trim();
-        if (!txt) continue;
-        for (const t of TEXTS) { if (txt.includes(t)) return tryClick(n); }
-      }
-      return false;
-    }
-    function findDidomiAndClick() {
-      const host = document.querySelector('#didomi-host');
-      if (!host) return false;
-      const roots = [];
-      if (host.shadowRoot) roots.push(host.shadowRoot);
-      const all = host.querySelectorAll('*');
-      for (const el of all) if (el.shadowRoot) roots.push(el.shadowRoot);
-      for (const r of roots) {
-        if (searchShadow(r)) return true;
-        const deep = r.querySelectorAll('*');
-        for (const d of deep) if (d.shadowRoot && searchShadow(d.shadowRoot)) return true;
-      }
-      return false;
-    }
-    return findDidomiAndClick();
-    """
     try:
-        return bool(driver.execute_script(js, CONSENT_TEXTS))
-    except WebDriverException:
+        host = driver.find_element(By.CSS_SELECTOR, "#didomi-host")
+    except:
         return False
+
+    roots_to_search = []
+    try:
+        roots_to_search.append(host.shadow_root)
+    except:
+        pass
+
+    for el in host.find_elements(By.CSS_SELECTOR, "*"):
+        try:
+            roots_to_search.append(el.shadow_root)
+        except:
+            continue
+
+    for shadow in roots_to_search:
+        try:
+            candidates = shadow.find_elements(By.CSS_SELECTOR, "button, [role='button']")
+            for btn in candidates:
+                txt = (btn.text or "").strip()
+                if not txt:
+                    continue
+                for t in CONSENT_TEXTS:
+                    if t in txt:
+                        try:
+                            btn.click()
+                            return True
+                        except:
+                            continue
+        except:
+            continue
+
+    return False
 
 def accept_all_consents(driver, timeout=15) -> bool:
     end = time.time() + timeout
@@ -170,8 +170,9 @@ def accept_all_consents(driver, timeout=15) -> bool:
     return False
 
 def slow_scroll(driver, steps=20, dy=1400, pause=0.2):
+    ac = ActionChains(driver)
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ac.scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 def extract_embed_urls_from_html(html: str) -> tuple[list[str], list[str]]:
@@ -258,7 +259,7 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
         all_links = sorted(set(yt_embeds) | set(dm_embeds))
         return all_links
 
-    except Exception:
+    except:
         return []
     finally:
         driver.quit()

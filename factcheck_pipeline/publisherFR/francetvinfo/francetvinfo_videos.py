@@ -7,6 +7,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -108,9 +109,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -130,47 +131,50 @@ def try_iframe_consent(driver) -> bool:
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
-        except Exception:
+        except:
             try:
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 pass
             continue
     return False
 
 def try_didomi_shadow_consent(driver) -> bool:
-    js = """
-    const TEXTS = arguments[0];
-    function searchShadow(root) {
-      const tryClick = (el) => { try { el.click(); return true; } catch(e) { return false; } };
-      const nodes = root.querySelectorAll('button, [role="button"], *');
-      for (const n of nodes) {
-        const txt = (n.textContent||'').trim();
-        if (!txt) continue;
-        for (const t of TEXTS) { if (txt.includes(t)) return tryClick(n); }
-      }
-      return false;
-    }
-    function findDidomiAndClick() {
-      const host = document.querySelector('#didomi-host');
-      if (!host) return false;
-      const roots = [];
-      if (host.shadowRoot) roots.push(host.shadowRoot);
-      const all = host.querySelectorAll('*');
-      for (const el of all) if (el.shadowRoot) roots.push(el.shadowRoot);
-      for (const r of roots) {
-        if (searchShadow(r)) return true;
-        const deep = r.querySelectorAll('*');
-        for (const d of deep) if (d.shadowRoot && searchShadow(d.shadowRoot)) return true;
-      }
-      return false;
-    }
-    return findDidomiAndClick();
-    """
     try:
-        return bool(driver.execute_script(js, CONSENT_TEXTS))
-    except WebDriverException:
+        host = driver.find_element(By.CSS_SELECTOR, "#didomi-host")
+    except:
         return False
+
+    roots_to_search = []
+    try:
+        roots_to_search.append(host.shadow_root)
+    except:
+        pass
+
+    for el in host.find_elements(By.CSS_SELECTOR, "*"):
+        try:
+            roots_to_search.append(el.shadow_root)
+        except:
+            continue
+
+    for shadow in roots_to_search:
+        try:
+            candidates = shadow.find_elements(By.CSS_SELECTOR, "button, [role='button']")
+            for btn in candidates:
+                txt = (btn.text or "").strip()
+                if not txt:
+                    continue
+                for t in CONSENT_TEXTS:
+                    if t in txt:
+                        try:
+                            btn.click()
+                            return True
+                        except:
+                            continue
+        except:
+            continue
+
+    return False
 
 def accept_all_consents(driver, timeout=15) -> bool:
     end = time.time() + timeout
@@ -185,18 +189,15 @@ def is_visible_player(driver, el, min_w=40, min_h=40) -> bool:
     try:
         if not el.is_displayed():
             return False
-        rect = driver.execute_script(
-            "const r=arguments[0].getBoundingClientRect();return [r.width,r.height,r.top,r.left];",
-            el
-        )
-        w, h = float(rect[0] or 0), float(rect[1] or 0)
+        size = el.size
+        w, h = float(size.get("width", 0)), float(size.get("height", 0))
         if w < min_w or h < min_h:
             return False
         style = (el.get_attribute("style") or "").lower()
         if "display:none" in style or "visibility:hidden" in style or "opacity: 0" in style or "opacity:0" in style:
             return False
         return True
-    except Exception:
+    except:
         return False
 
 def extract_embeds_from_srcdoc(srcdoc: str):
@@ -223,7 +224,7 @@ def extract_embeds_from_srcdoc(srcdoc: str):
 def extract_from_wrapper(driver) -> dict[str, list[str]]:
     try:
         wrapper = driver.find_element(By.CSS_SELECTOR, WRAPPER_CSS)
-    except Exception:
+    except:
         return {}
 
     buckets = {"youtube": [], "dailymotion": [], "tiktok": [], "twitter": [], "raw_video": []}
@@ -283,7 +284,7 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
         time.sleep(0.6)
 
         for _ in range(18):
-            driver.execute_script("window.scrollBy(0, 1400);")
+            ActionChains(driver).scroll_by_amount(0, 1400).perform()
             time.sleep(0.2)
 
         results = extract_from_wrapper(driver)
@@ -294,7 +295,7 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
         for k in ("youtube", "dailymotion", "tiktok", "twitter", "raw_video"):
             flat.extend(results.get(k, []))
         return sorted(set(flat))
-    except Exception:
+    except:
         return []
     finally:
         driver.quit()

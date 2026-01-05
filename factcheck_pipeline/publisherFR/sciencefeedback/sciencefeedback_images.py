@@ -163,7 +163,7 @@ def extract_images_with_captions_scifeed_between_verification_and_references(art
 
     try:
         soup = BeautifulSoup(r.text, "lxml")
-    except Exception:
+    except:
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url

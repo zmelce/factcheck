@@ -68,7 +68,7 @@ def is_stop_element(el: Tag) -> bool:
                 return True
             anc = anc.find_parent(lambda t: isinstance(t, Tag) and t.get("class"))
 
-    except Exception:
+    except:
         pass
 
     return False

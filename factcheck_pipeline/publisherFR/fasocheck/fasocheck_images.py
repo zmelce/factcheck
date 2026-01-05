@@ -29,7 +29,9 @@ def get_ext(u: str) -> str:
 
 def is_img_url(u: str) -> bool:
     ext = get_ext(u)
-    return bool(ext) and (ext in IMG_EXT)
+    if not ext:
+        return False
+    return (ext in IMG_EXT)
 
 def pick_largest_from_srcset(srcset: str, base: str) -> str | None:
     best_u, best_w = None, -1
@@ -106,7 +108,7 @@ def extract_images_with_captions(article_url: str):
     html = r.text
     try:
         soup = BeautifulSoup(html, "lxml")
-    except Exception:
+    except:
         soup = BeautifulSoup(html, "html.parser")
 
     base = r.url

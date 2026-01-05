@@ -7,6 +7,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -32,7 +33,7 @@ def make_driver(headless: bool = True):
 
 def slow_scroll(driver, steps=10, dy=1200, pause=0.18):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
@@ -118,7 +119,7 @@ def scrape_in_factuel_block(driver) -> tuple[list[str], list[str], list[str], li
             By.CSS_SELECTOR,
             "div#block-factuel-content.block.block-system.block-system-main-block"
         )
-    except Exception:
+    except:
         return [], [], [], []
 
     items = block.find_elements(By.CSS_SELECTOR, "div.g2item.g2web, div.g2web")
@@ -162,7 +163,7 @@ def extract_links(review_url: str, headless: bool = True) -> List[str]:
 
         flat = yt + dm + ult + raw
         return sorted(set(flat))
-    except Exception:
+    except:
         return []
     finally:
         driver.quit()

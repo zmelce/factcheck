@@ -75,7 +75,9 @@ def canonical_key(u: str) -> str:
 
 
 def ok_ext(u: str) -> bool:
-    return bool(u) and any(urlsplit(u).path.lower().endswith(e) for e in IMG_EXT)
+    if not u:
+        return False
+    return any(urlsplit(u).path.lower().endswith(e) for e in IMG_EXT)
 
 
 def safe_slug(s: str, n=64) -> str:
@@ -114,7 +116,7 @@ def click_consent(driver, timeout: int = 18) -> None:
                     el.click()
                     print(f"    Consent clicked: '{t}'")
                     return
-                except Exception:
+                except:
                     continue
         if not tried_iframes:
             for fr in driver.find_elements(By.TAG_NAME, "iframe"):
@@ -128,13 +130,13 @@ def click_consent(driver, timeout: int = 18) -> None:
                                 print(f"    Consent clicked (iframe): '{t}'")
                                 driver.switch_to.default_content()
                                 return
-                            except Exception:
+                            except:
                                 continue
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     try:
                         driver.switch_to.default_content()
-                    except Exception:
+                    except:
                         pass
             tried_iframes = True
         time.sleep(0.3)
@@ -154,8 +156,10 @@ def fetch_rendered_html(article_url: str, headless: bool = True) -> str | None:
         click_consent(driver, timeout=18)
         time.sleep(1)
 
+        from selenium.webdriver.common.action_chains import ActionChains
+        _ac = ActionChains(driver)
         for _ in range(15):
-            driver.execute_script("window.scrollBy(0, 1400);")
+            _ac.scroll_by_amount(0, 1400).perform()
             time.sleep(0.3)
         driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(1)
@@ -300,112 +304,9 @@ def parse_images_regex(html: str) -> list[dict]:
     return images
 
 
-def extract_images_via_js(driver) -> list[dict]:
-    js_code = """
-    const results = [];
-    const article = document.querySelector('article');
-    if (!article) return JSON.stringify({images: [], debug: 'no <article> element'});
-
-    // Find all divs inside article that have EXACTLY "absatzbild" as one of their classes
-    const allDivs = article.querySelectorAll('div');
-    let absatzbildCount = 0;
-    let skippedCount = 0;
-
-    for (const div of allDivs) {
-        // Check: must have "absatzbild" as an exact class (not absatzbild__media etc.)
-        const classes = Array.from(div.classList);
-        if (!classes.includes('absatzbild')) continue;
-        absatzbildCount++;
-
-        // SKIP checks using closest() — much more reliable than BS4's find_parent
-        if (div.closest('.article-head')) { skippedCount++; continue; }
-        if (div.closest('.article-head__media')) { skippedCount++; continue; }
-        if (div.closest('.teaser-absatz')) { skippedCount++; continue; }
-        if (div.closest('.teaser-absatz__image')) { skippedCount++; continue; }
-        if (div.closest('.teaser-absatz__media')) { skippedCount++; continue; }
-        if (div.closest('aside')) { skippedCount++; continue; }
-        if (div.closest('header')) { skippedCount++; continue; }
-        if (div.closest('footer')) { skippedCount++; continue; }
-        if (div.closest('nav')) { skippedCount++; continue; }
-
-        // Must have .absatzbild__media child
-        const mediaDivs = div.querySelectorAll('.absatzbild__media');
-        if (mediaDivs.length === 0) continue;
-
-        for (const mediaDiv of mediaDivs) {
-            // Get caption
-            let caption = '';
-            let copyright = '';
-
-            const infoText = div.querySelector('.absatzbild__info__text');
-            if (infoText) caption = infoText.textContent.trim();
-
-            // Get img element
-            const img = mediaDiv.querySelector('img.ts-image') || mediaDiv.querySelector('img');
-            if (img) {
-                const title = img.getAttribute('title') || '';
-                if (title) {
-                    const parts = title.split('|');
-                    if (!caption) caption = parts[0].trim();
-                    if (parts.length > 1) copyright = parts[1].trim();
-                }
-                if (!caption) caption = (img.getAttribute('alt') || '').trim();
-            }
-
-            const fullCap = copyright ? caption + ' © ' + copyright : caption;
-
-            // Collect all source srcset URLs
-            const sources = mediaDiv.querySelectorAll('picture source[srcset]');
-            for (const source of sources) {
-                const srcset = source.getAttribute('srcset') || '';
-                const parts = srcset.split(',');
-                for (const part of parts) {
-                    const url = part.trim().split(/\\s+/)[0];
-                    if (url && /\\.(jpg|jpeg|png|webp|avif)/i.test(url)) {
-                        results.push({url: url, cap: fullCap});
-                    }
-                }
-            }
-
-            // Also img src
-            if (img) {
-                const src = img.getAttribute('src') || '';
-                if (src && /\\.(jpg|jpeg|png|webp|avif)/i.test(src)) {
-                    results.push({url: src, cap: fullCap});
-                }
-            }
-        }
-    }
-
-    return JSON.stringify({
-        images: results,
-        debug: 'article found, absatzbild=' + absatzbildCount + ', skipped=' + skippedCount + ', kept=' + results.length
-    });
-    """
-
-    try:
-        raw = driver.execute_script(js_code)
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        print(f"    [JS] {data.get('debug', '')}")
-
-        images = []
-        for item in data.get("images", []):
-            url = item.get("url", "")
-            if url:
-                images.append({
-                    "url": url,
-                    "w": infer_width(url),
-                    "cap": item.get("cap", ""),
-                })
-        return images
-    except Exception as e:
-        print(f"    [JS] Error: {e}")
-        return []
-
-
 def extract_all_images(html: str, base_url: str, driver=None) -> list[dict]:
     if driver:
-        return extract_images_via_js(driver)
+        return parse_images_bs4(driver.page_source, base_url)
 
     return parse_images_bs4(html, base_url)
 
@@ -503,8 +404,10 @@ def screenshot_embeds(article_url: str, embeds: list[dict],
         click_consent(driver, timeout=18)
         time.sleep(1)
 
+        from selenium.webdriver.common.action_chains import ActionChains
+        _ac = ActionChains(driver)
         for _ in range(15):
-            driver.execute_script("window.scrollBy(0, 1400);")
+            _ac.scroll_by_amount(0, 1400).perform()
             time.sleep(0.3)
         driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(1)
@@ -527,10 +430,10 @@ def screenshot_embeds(article_url: str, embeds: list[dict],
                             By.CSS_SELECTOR, f"iframe[src*='{embed_url[:40]}']"
                         )
                         if elements:
-                            el = driver.execute_script(
-                                "return arguments[0].closest('.v-instance') || arguments[0].parentElement;",
-                                elements[0],
-                            )
+                            try:
+                                el = elements[0].find_element(By.XPATH, "ancestor::*[contains(concat(' ',@class,' '),' v-instance ')][1]")
+                            except:
+                                el = elements[0].find_element(By.XPATH, "..") if elements[0] else elements[0]
                             if not el:
                                 el = elements[0]
                 else:
@@ -601,8 +504,10 @@ def scrape_article(article_url: str, out_dir: str, headless: bool = True):
         click_consent(driver, timeout=18)
         time.sleep(1)
 
+        from selenium.webdriver.common.action_chains import ActionChains
+        _ac = ActionChains(driver)
         for _ in range(15):
-            driver.execute_script("window.scrollBy(0, 1400);")
+            _ac.scroll_by_amount(0, 1400).perform()
             time.sleep(0.3)
         driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(1)
@@ -610,7 +515,7 @@ def scrape_article(article_url: str, out_dir: str, headless: bool = True):
         html = driver.page_source
         print(f"    Page loaded. Source: {len(html)} chars")
 
-        candidates = extract_images_via_js(driver)
+        candidates = parse_images_bs4(html, article_url)
         print(f"    Total image candidates: {len(candidates)}")
 
         if not candidates:
@@ -704,11 +609,10 @@ def scrape_article(article_url: str, out_dir: str, headless: bool = True):
                                 f"iframe[src*='{embed_url[:40]}']",
                             )
                             if elements:
-                                el = driver.execute_script(
-                                    "return arguments[0].closest('.v-instance') "
-                                    "|| arguments[0].parentElement;",
-                                    elements[0],
-                                )
+                                try:
+                                    el = elements[0].find_element(By.XPATH, "ancestor::*[contains(concat(' ',@class,' '),' v-instance ')][1]")
+                                except:
+                                    el = elements[0].find_element(By.XPATH, "..") if elements[0] else elements[0]
                                 if not el:
                                     el = elements[0]
                     else:

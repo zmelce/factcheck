@@ -12,7 +12,7 @@ IMG_EXT  = (".jpg", ".jpeg", ".png", ".webp", ".avif")
 try:
     from playwright.sync_api import sync_playwright
     _PLAYWRIGHT_OK = True
-except Exception:
+except:
     _PLAYWRIGHT_OK = False
 
 def absurl(base, u):
@@ -91,7 +91,7 @@ def tweet_id_from_url(u: str) -> str | None:
         m = _TWEET_STATUS_RE.search(u)
         if m:
             return m.group(3)
-    except Exception:
+    except:
         pass
     return None
 
@@ -124,7 +124,7 @@ def capture_tweet_screenshot(any_tweet_ref: str, dest_dir: str, prefix: str, wid
                 try:
                     page.wait_for_selector(sel, timeout=6000)
                     break
-                except Exception:
+                except:
                     continue
             page.screenshot(path=out_path, full_page=True)
             context.close()
@@ -220,7 +220,7 @@ def extract_assets_numerama(article_url):
 
     try:
         soup = BeautifulSoup(r.text, "lxml")
-    except Exception:
+    except:
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url

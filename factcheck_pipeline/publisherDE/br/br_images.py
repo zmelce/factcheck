@@ -332,7 +332,7 @@ def screenshot_embeds_with_playwright(article_url: str, embeds: list[dict],
             page.goto(article_url, wait_until="domcontentloaded", timeout=60000)
             try:
                 page.wait_for_load_state("load", timeout=20000)
-            except Exception:
+            except:
                 pass
 
             # Dismiss consent
@@ -343,7 +343,7 @@ def screenshot_embeds_with_playwright(article_url: str, embeds: list[dict],
                         loc.first.click(timeout=2000)
                         page.wait_for_timeout(500)
                         break
-                except Exception:
+                except:
                     pass
 
             # Scroll to load embeds
@@ -415,7 +415,7 @@ def screenshot_embeds_with_playwright(article_url: str, embeds: list[dict],
 # ---------------------------------------------------------------------------
 # Main scraper
 # ---------------------------------------------------------------------------
-def _scrape_article_figures(article_url: str, out_dir="br_assets", headless=True):
+def scrape_article_figures(article_url: str, out_dir="br_assets", headless=True):
     os.makedirs(out_dir, exist_ok=True)
     rows = []
     prefix = safe_slug(article_url)
@@ -506,7 +506,7 @@ def _scrape_article_figures(article_url: str, out_dir="br_assets", headless=True
 
 def handle(review_url: str, location_info: str, headless: bool = True):
     os.makedirs(location_info, exist_ok=True)
-    items = _scrape_article_figures(review_url, out_dir=location_info, headless=headless)
+    items = scrape_article_figures(review_url, out_dir=location_info, headless=headless)
 
     if items:
         df = pd.DataFrame(items)

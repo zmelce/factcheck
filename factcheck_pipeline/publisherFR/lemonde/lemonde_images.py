@@ -73,7 +73,7 @@ def extract_images_with_captions(article_url):
 
     try:
         soup = BeautifulSoup(r.text, "lxml")
-    except Exception:
+    except:
         soup = BeautifulSoup(r.text, "html.parser")
 
     base = r.url
@@ -130,7 +130,7 @@ def extract_images_with_captions(article_url):
                         if u:
                             best_url = u
                             break
-                except Exception:
+                except:
                     pass
 
         if best_url and (not get_ext(best_url) or get_ext(best_url) in IMG_EXT):

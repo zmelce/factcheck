@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -62,7 +63,7 @@ def click_first_button_with_text(driver, texts) -> bool:
                 time.sleep(0.07)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
     return False
 
@@ -81,10 +82,10 @@ def accept_consents(driver, timeout: int = 18) -> None:
                         driver.switch_to.default_content()
                         return
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     try:
                         driver.switch_to.default_content()
-                    except Exception:
+                    except:
                         pass
             tried_iframes = True
         time.sleep(0.25)
@@ -92,7 +93,7 @@ def accept_consents(driver, timeout: int = 18) -> None:
 
 def slow_scroll(driver, steps=10, dy=1400, pause=0.18):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 
@@ -134,7 +135,7 @@ def extract_rtl_native_videos(driver) -> List[str]:
 
     try:
         main_html = main_el.get_attribute("innerHTML") or ""
-    except Exception:
+    except:
         main_html = ""
 
     for m in re.finditer(
@@ -213,7 +214,7 @@ def extract_facebook_videos(driver) -> List[str]:
 
     try:
         main_html = main_el.get_attribute("innerHTML") or ""
-    except Exception:
+    except:
         main_html = ""
     for m in FB_PLUGIN_RE.finditer(main_html):
         urls.add(unescape(m.group(0)))

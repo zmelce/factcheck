@@ -56,7 +56,7 @@ def extract_tweet_id_from_url(u: str) -> str | None:
             q = parse_qs(sp.query)
             tid = (q.get("id") or q.get("tweet_id") or [None])[0]
             return tid
-    except Exception:
+    except:
         pass
     return None
 
@@ -99,7 +99,7 @@ def try_accept_consents(driver, timeout=8):
                     time.sleep(0.05)
                     el.click()
                     return
-                except Exception:
+                except:
                     pass
         for fr in driver.find_elements(By.TAG_NAME, "iframe"):
             try:
@@ -113,12 +113,12 @@ def try_accept_consents(driver, timeout=8):
                             el.click()
                             driver.switch_to.default_content()
                             return
-                        except Exception:
+                        except:
                             pass
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 try: driver.switch_to.default_content()
-                except Exception: pass
+                except: pass
         time.sleep(0.2)
 
 def extract_video_iframes(driver, scope_css: str | None = None, autoplay_youtube=True) -> Dict[str, List[str]]:

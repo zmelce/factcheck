@@ -1,5 +1,5 @@
 import os, re, json, hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
@@ -23,69 +23,72 @@ def safe_slug(s: str, n=64):
     s = re.sub(r"[^\w.-]+", "_", s).strip("._")
     return s[-n:] if len(s) > n else (s or "article")
 
-def extract_in_page(page):
-    return page.evaluate("""
-    () => {
-      const ROOT = document.querySelector('#block-factuel-content') || document;
-      const ALLOWED = ['.jpg','.jpeg','.png'];
-      const clean = s => (s || '').replace(/\\s+/g,' ').trim();
-      const ok = u => u && ALLOWED.some(e => (u.toLowerCase().split('?')[0] || '').endsWith(e));
-      const abs = u => { try { return new URL(u, location.href).href } catch { return null } };
-      const out = []; const seen = new Set();
 
-      // Primary: blocks with wrapper-image
-      const blocks = Array.from(ROOT.querySelectorAll('div.wrapper-image'));
-      for (const b of blocks) {
-        const cap = clean(Array.from(b.querySelectorAll('span.legend'))
-                     .map(n=>n.textContent).join(' '));
-        const imgs = Array.from(b.querySelectorAll('img[loading], img.img-fluid, img'));
-        for (const img of imgs) {
-          let u = img.currentSrc || img.src || img.getAttribute('data-src') || '';
-          if (!u) {
-            const ss = img.getAttribute('srcset') || img.getAttribute('data-srcset') || '';
-            if (ss) {
-              const parts = ss.split(',').map(s=>s.trim()).filter(Boolean);
-              if (parts.length) u = parts[parts.length-1].split(/\\s+/)[0];
-            }
-          }
-          const href = abs(u);
-          if (!href || !ok(href) || seen.has(href)) continue;
-          seen.add(href);
-          out.push({image_url: href, caption: cap});
-        }
-      }
+def extract_in_page(page, article_url: str) -> list[dict]:
+    ALLOWED = (".jpg", ".jpeg", ".png")
 
-      // Fallback: any img exclusively INSIDE #block-factuel-content
-      if (!out.length) {
-        const imgs = Array.from(ROOT.querySelectorAll('img[loading], img.img-fluid, img'));
-        for (const img of imgs) {
-          let u = img.currentSrc || img.src || img.getAttribute('data-src') || '';
-          if (!u) {
-            const ss = img.getAttribute('srcset') || img.getAttribute('data-srcset') || '';
-            if (ss) {
-              const parts = ss.split(',').map(s=>s.trim()).filter(Boolean);
-              if (parts.length) u = parts[parts.length-1].split(/\\s+/)[0];
-            }
-          }
-          const href = abs(u);
-          if (!href || !ok(href) || seen.has(href)) continue;
+    def ok(u: str) -> bool:
+        if not u:
+            return False
+        return any(u.lower().split("?")[0].endswith(e) for e in ALLOWED)
 
-          let cap = '';
-          const wrap = img.closest('div.wrapper-image');
-          if (wrap && ROOT.contains(wrap)) {
-            cap = clean(Array.from(wrap.querySelectorAll('span.legend'))
-                       .map(n=>n.textContent).join(' '));
-          }
-          seen.add(href);
-          out.push({image_url: href, caption: cap});
-        }
-      }
-      return out;
-    }
-    """)
+    root = page.query_selector("#block-factuel-content") or page.query_selector("body")
+    if not root:
+        return []
 
-def scrape_with_playwright(url, out_dir,
-                           headless=True, store_json=True):
+    out = []
+    seen = set()
+
+    blocks = root.query_selector_all("div.wrapper-image")
+    for b in blocks:
+        legend_els = b.query_selector_all("span.legend")
+        cap = clean(" ".join(el.inner_text() for el in legend_els))
+
+        for img in b.query_selector_all("img[loading], img.img-fluid, img"):
+            u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or ""
+            if not u:
+                srcset = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                parts = [p.strip() for p in srcset.split(",") if p.strip()]
+                if parts:
+                    u = parts[-1].split()[0]
+            if not u:
+                continue
+            href = urljoin(article_url, u)
+            if not ok(href) or href in seen:
+                continue
+            seen.add(href)
+            out.append({"image_url": href, "caption": cap})
+
+    if not out:
+        for img in root.query_selector_all("img[loading], img.img-fluid, img"):
+            u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or ""
+            if not u:
+                srcset = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                parts = [p.strip() for p in srcset.split(",") if p.strip()]
+                if parts:
+                    u = parts[-1].split()[0]
+            if not u:
+                continue
+            href = urljoin(article_url, u)
+            if not ok(href) or href in seen:
+                continue
+
+            cap = ""
+            wrap_handle = img.evaluate_handle("el => el.closest('div.wrapper-image')")
+            wrap_el = wrap_handle.as_element()
+            if wrap_el:
+                root_contains = root.evaluate("(root, el) => root.contains(el)", wrap_el)
+                if root_contains:
+                    legend_els = wrap_el.query_selector_all("span.legend")
+                    cap = clean(" ".join(el.inner_text() for el in legend_els))
+
+            seen.add(href)
+            out.append({"image_url": href, "caption": cap})
+
+    return out
+
+
+def scrape_with_playwright(url, out_dir, headless=True, store_json=True):
     rows = []
     images = []
     with sync_playwright() as p:
@@ -111,22 +114,20 @@ def scrape_with_playwright(url, out_dir,
                     try:
                         body = resp.body()
                         captured[u] = (ct, body)
-                    except Exception:
+                    except:
                         pass
-            except Exception:
+            except:
                 pass
 
         page = context.new_page()
         page.on("response", on_response)
-
-        rec = {"reviewURL": url}
 
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             try:
                 page.wait_for_selector("#block-factuel-content", timeout=20000)
-            except Exception:
+            except:
                 pass
 
             for sel in [
@@ -138,7 +139,7 @@ def scrape_with_playwright(url, out_dir,
                     if page.locator(sel).count() > 0:
                         page.locator(sel).first.click(timeout=1500)
                         break
-                except Exception:
+                except:
                     pass
 
             for _ in range(8):
@@ -146,7 +147,7 @@ def scrape_with_playwright(url, out_dir,
                 page.wait_for_timeout(350)
             page.wait_for_timeout(800)
 
-            found = extract_in_page(page)
+            found = extract_in_page(page, url)
 
             prefix = safe_slug(url)
             for it in found:
@@ -161,7 +162,6 @@ def scrape_with_playwright(url, out_dir,
                     with open(path, "wb") as f:
                         f.write(body)
                     saved = path
-
 
                 if not saved:
                     base_noq = img.split("?", 1)[0]
@@ -197,14 +197,12 @@ def scrape_with_playwright(url, out_dir,
                             saved = path
 
                 image_name = saved
-                if (saved != None):
+                if saved is not None:
                     image_name = os.path.basename(saved)
                 images.append({"image_url": img, "caption": it["caption"], "path": image_name})
 
-        except Exception as e:
+        except:
             return []
-
-
 
         browser.close()
     return images
@@ -216,7 +214,7 @@ def handle(review_url: str, location_info: str):
         headless=False,
         store_json=False,
     )
-    out_df =pd.DataFrame(out_list)
+    out_df = pd.DataFrame(out_list)
     if not out_df.empty:
         csv_path = os.path.join(location_info, "image_info.csv")
         out_df.to_csv(csv_path, index=False, encoding="utf-8")

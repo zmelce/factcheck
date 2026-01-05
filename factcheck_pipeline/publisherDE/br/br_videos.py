@@ -11,6 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -67,7 +68,7 @@ def click_first_button_with_text(driver, texts) -> bool:
                 time.sleep(0.07)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
     return False
 
@@ -86,10 +87,10 @@ def accept_consents(driver, timeout: int = 18) -> None:
                         driver.switch_to.default_content()
                         return
                     driver.switch_to.default_content()
-                except Exception:
+                except:
                     try:
                         driver.switch_to.default_content()
-                    except Exception:
+                    except:
                         pass
             tried_iframes = True
         time.sleep(0.25)
@@ -97,7 +98,7 @@ def accept_consents(driver, timeout: int = 18) -> None:
 
 def slow_scroll(driver, steps: int = 10, dy: int = 1400, pause: float = 0.18) -> None:
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 

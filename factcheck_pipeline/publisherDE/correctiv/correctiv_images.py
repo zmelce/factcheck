@@ -1,8 +1,8 @@
-
 import os, re, time, hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 import pandas as pd
+from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 UA = (
@@ -20,8 +20,7 @@ CONSENT_TEXTS = [
 
 
 def clean(s: str | None) -> str:
-    import re as _re
-    return _re.sub(r"\s+", " ", (s or "")).strip()
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
 def get_ext(u: str) -> str:
     return os.path.splitext(urlsplit(u).path.lower())[1]
@@ -34,6 +33,11 @@ def ext_priority(u: str) -> int:
     if e == ".avif": return 1
     return 0
 
+def ok_ext(u: str) -> bool:
+    if not u:
+        return False
+    return any(u.lower().split("?")[0].endswith(e) for e in IMG_EXT)
+
 def infer_width_from_url(u: str) -> int:
     m = (
         re.search(r"/fit-in/(\d+)x", u) or
@@ -45,112 +49,118 @@ def infer_width_from_url(u: str) -> int:
 def canonical_key(u: str) -> str:
     parts = urlsplit(u)
     path = parts.path
-
     path = re.sub(r"/fit-in/\d+x\d+/?", "/", path, flags=re.I)
-
     path = re.sub(r"/\d{2,4}x\d{2,4}/", "/", path, flags=re.I)
-
     dirpath, fname = os.path.split(path)
     if fname:
         fname = re.sub(r"-(\d{2,4}x\d{2,4})(\.[a-z0-9]{2,4}$)", r"\2", fname, flags=re.I)
         fname = re.sub(r"-(scaled)(\.[a-z0-9]{2,4}$)", r"\2", fname, flags=re.I)
         path = (dirpath + "/" + fname).replace("//", "/")
-
     return f"{parts.netloc}{path}"
 
 def caption_key(s: str) -> str:
     return clean(s).lower()
 
 def safe_slug(s: str, n=64) -> str:
-    import re as _re
-    s = _re.sub(r"https?://", "", s or "")
-    s = _re.sub(r"[^\w.-]+", "_", s).strip("._")
+    s = re.sub(r"https?://", "", s or "")
+    s = re.sub(r"[^\w.-]+", "_", s).strip("._")
     return s[-n:] if len(s) > n else (s or "article")
 
+def parse_srcset_py(srcset: str, base_url: str) -> list[dict]:
+    results = []
+    for part in (srcset or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split()
+        if not bits:
+            continue
+        u = urljoin(base_url, bits[0])
+        w = 0
+        if len(bits) > 1 and bits[1].endswith("w"):
+            try:
+                w = int(bits[1][:-1])
+            except ValueError:
+                pass
+        if not w:
+            w = infer_width_from_url(u)
+        results.append({"url": u, "w": w})
+    return results
 
-JS_EXTRACT_FIGURES = """
-() => {
-  const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
-  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const ok = u => !!u && ALLOWED.some(e => u.toLowerCase().split('?')[0].endsWith(e));
-  const abs = (u) => { try { return new URL(u, location.href).href } catch { return null } };
 
-  function inferWidth(u) {
-    let m = u.match(/\\/fit-in\\/(\\d+)x/) || u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/) || u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
-    return m ? parseInt(m[1], 10) : 0;
-  }
-  function parseSrcset(ss) {
-    const out = [];
-    (ss || '').split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
-      const bits = part.split(/\\s+/);
-      const u = abs(bits[0]);
-      let w = 0;
-      if (bits.length > 1 && /\\d+w$/.test(bits[1])) { try { w = parseInt(bits[1], 10) } catch { w = 0 } }
-      if (u) out.push({url: u, w});
-    });
-    return out;
-  }
+def extract_figures(page, article_url: str) -> list[dict]:
+    body_selectors = [
+        "article", "main", ".article", ".article-body",
+        ".entry-content", ".post-content", ".content", "body",
+    ]
+    body = None
+    for sel in body_selectors:
+        el = page.query_selector(sel)
+        if el and el.query_selector("figure, img"):
+            body = el
+            break
+    if not body:
+        body = page.query_selector("body")
+    if not body:
+        return []
 
-  // likely article content roots
-  const bodies = Array.from(document.querySelectorAll(
-    "article, main, .article, .article-body, .entry-content, .post-content, .content, body"
-  ));
-  const body = bodies.find(b => b && b.querySelector("figure, img")) || document.body;
+    candidates = []
 
-  const images = [];
+    for fig in body.query_selector_all("figure"):
+        cap_el = fig.query_selector("figcaption")
+        cap = clean(cap_el.inner_text() if cap_el else "")
 
-  for (const fig of body.querySelectorAll("figure")) {
-    const cap = clean((fig.querySelector("figcaption") || {}).textContent || "");
+        for pic in fig.query_selector_all("picture"):
+            for src in pic.query_selector_all("source"):
+                ss = src.get_attribute("srcset") or src.get_attribute("data-srcset") or ""
+                for c in parse_srcset_py(ss, article_url):
+                    if ok_ext(c["url"]):
+                        candidates.append({**c, "cap": cap})
+            img = pic.query_selector("img")
+            if img:
+                u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or img.get_attribute("data-original") or ""
+                if u:
+                    u = urljoin(article_url, u)
+                    if ok_ext(u):
+                        candidates.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
+                else:
+                    ss = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                    for c in parse_srcset_py(ss, article_url):
+                        if ok_ext(c["url"]):
+                            candidates.append({**c, "cap": cap})
 
-    // picture/source/srcset
-    for (const pic of fig.querySelectorAll("picture")) {
-      for (const src of pic.querySelectorAll("source")) {
-        const ss = src.getAttribute("srcset") || src.getAttribute("data-srcset");
-        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-      }
-      const im = pic.querySelector("img");
-      if (im) {
-        let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-        if (!u) {
-          const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-          if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-        } else { u = abs(u); if (ok(u)) images.push({url: u, w: inferWidth(u), cap}); }
-      }
-    }
+        for ns in fig.query_selector_all("noscript"):
+            inner = ns.inner_html()
+            if not inner:
+                continue
+            soup = BeautifulSoup(inner, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag:
+                u = urljoin(article_url, img_tag.get("src", ""))
+                if ok_ext(u):
+                    candidates.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
 
-    // noscript fallback inside figure
-    for (const ns of fig.querySelectorAll("noscript")) {
-      const tmp = document.createElement("div");
-      tmp.innerHTML = ns.innerHTML;
-      const im = tmp.querySelector("img");
-      if (im) {
-        const u = abs(im.getAttribute("src"));
-        if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-      }
-    }
+        for img in fig.query_selector_all("img"):
+            if img.evaluate("el => !!el.closest('picture')"):
+                continue
+            u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or img.get_attribute("data-original") or ""
+            if u:
+                u = urljoin(article_url, u)
+                if ok_ext(u):
+                    candidates.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
+            else:
+                ss = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                for c in parse_srcset_py(ss, article_url):
+                    if ok_ext(c["url"]):
+                        candidates.append({**c, "cap": cap})
 
-    // plain <img> inside figure
-    for (const im of fig.querySelectorAll("img")) {
-      if (im.closest("picture")) continue;
-      let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-      if (u) { u = abs(u); if (ok(u)) images.push({url: u, w: inferWidth(u), cap}); }
-      else {
-        const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-        if (ss) for (const it of parseSrcset(ss)) if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-      }
-    }
+        a = fig.query_selector("a[href]")
+        if a:
+            href = urljoin(article_url, a.get_attribute("href") or "")
+            if ok_ext(href):
+                candidates.append({"url": href, "w": infer_width_from_url(href), "cap": cap})
 
-    // sometimes the clickable <a> has the full image URL
-    const a = fig.querySelector("a[href]");
-    if (a) {
-      const u = abs(a.getAttribute("href"));
-      if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-    }
-  }
-
-  return { images };
-}
-"""
+    return candidates
 
 
 def try_dismiss_consent(page) -> bool:
@@ -161,7 +171,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
         try:
             loc = page.locator(f"button:has-text('{t}')")
@@ -169,7 +179,7 @@ def try_dismiss_consent(page) -> bool:
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(300)
                 return True
-        except Exception:
+        except:
             pass
     for fr in page.frames:
         for t in CONSENT_TEXTS:
@@ -179,7 +189,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
             try:
                 loc = fr.locator(f"button:has-text('{t}')")
@@ -187,7 +197,7 @@ def try_dismiss_consent(page) -> bool:
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(300)
                     return True
-            except Exception:
+            except:
                 pass
     return False
 
@@ -215,12 +225,11 @@ def add_lazyload_forcers(context):
     """)
 
 def route_block_noise(page):
-    import re as _re
-    BLOCK_RE = _re.compile(
+    BLOCK_RE = re.compile(
         r"(doubleclick\.net|googlesyndication\.com|google-analytics\.com|googletagmanager\.com"
         r"|adnxs\.com|criteo\.com|facebook\.net|connect\.facebook\.net|taboola\.com|scorecardresearch\.com"
         r"|outbrain\.com|quantserve\.com|hotjar\.com|tiktokcdn|fonts\.gstatic\.com|fonts\.googleapis\.com)",
-        _re.I
+        re.I
     )
     def route(route):
         req = route.request
@@ -231,7 +240,6 @@ def route_block_noise(page):
     page.route("**/*", route)
 
 def robust_goto(page, url, max_tries=3, base_timeout=45000):
-    from playwright.sync_api import TimeoutError as PWTimeout
     for i in range(max_tries):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=base_timeout)
@@ -247,7 +255,6 @@ def robust_goto(page, url, max_tries=3, base_timeout=45000):
     return False
 
 def scroll_until_stable(page, max_scrolls=40, step=1400, idle_ms=350):
-    from playwright.sync_api import TimeoutError as PWTimeout
     stable_hits = 0
     for _ in range(max_scrolls):
         h = page.evaluate("document.scrollingElement.scrollHeight")
@@ -329,8 +336,7 @@ def scrape_article_figures(article_url: str, out_dir="correctiv_assets", headles
             wait_network_quiet(page, 7000)
             wait_for_images_settled(page, 12000)
 
-            payload = page.evaluate(JS_EXTRACT_FIGURES)
-            candidates = payload.get("images", [])
+            candidates = extract_figures(page, article_url)
 
             def score(c):
                 w = int(c.get("w") or infer_width_from_url(c["url"]))
@@ -382,7 +388,7 @@ def scrape_article_figures(article_url: str, out_dir="correctiv_assets", headles
                     with open(fpath, "wb") as f:
                         f.write(r.body())
                     rows.append({"image_url": img, "caption": cap, "path": fname})
-                except Exception:
+                except:
                     continue
 
         finally:

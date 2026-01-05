@@ -158,7 +158,7 @@ def fetch_html_with_playwright(url: str, headless: bool = True, timeout_ms: int 
                 page.mouse.wheel(0, 1200)
                 page.wait_for_timeout(400)
                 page.evaluate("window.scrollTo(0,0)")
-            except Exception:
+            except:
                 pass
 
             return page.content()
@@ -172,7 +172,7 @@ def fetch_html_with_playwright(url: str, headless: bool = True, timeout_ms: int 
 def domain(url: str) -> str:
     try:
         return (urlparse(url).netloc or "").lower()
-    except Exception:
+    except:
         return ""
 
 
@@ -186,7 +186,7 @@ def fetch_and_extract(url: str, timeout: int = 30, headless: bool = True) -> dic
             raise requests.HTTPError(f"HTTP {resp.status_code} for {url}", response=resp)
         resp.raise_for_status()
         html = resp.text
-    except Exception:
+    except:
         html = None
 
     title = ""

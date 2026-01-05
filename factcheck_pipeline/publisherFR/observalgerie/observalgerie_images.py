@@ -44,7 +44,7 @@ def pick_from_srcset(srcset: str) -> str | None:
             elif toks[1].endswith("x"):
                 try:
                     w = int(float(toks[1][:-1]) * 1000)
-                except Exception:
+                except:
                     w = 0
         if w >= best_w:
             best_w = w
@@ -103,7 +103,7 @@ def image_info_from_bytes(content: bytes) -> tuple[int | None, int | None, str |
         with Image.open(io.BytesIO(content)) as im:
             w, h = im.size
             return w, h, im.format
-    except Exception:
+    except:
         return None, None, None
 
 def sha256_hex(content: bytes) -> str:

@@ -7,6 +7,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -59,12 +60,12 @@ def sanitize_provider_url(u: str) -> str:
         qs = dict(parse_qsl(sp.query))
         for k in list(qs.keys()):
             if k.lower() in {"rd", "rp", "cr", "wp", "v"}:
-                qs.pop(k, None)
+                del qs[k]
         path = sp.path
         if ("instagram.com/p/" in u or "instagram.com/reel/" in u) and not path.endswith("/"):
             path += "/"
         return urlunsplit((sp.scheme, sp.netloc, path, urlencode(qs), ""))
-    except Exception:
+    except:
         return u
 
 def extract_urls_matching(html: str, patterns) -> list[str]:
@@ -128,9 +129,9 @@ def click_first(driver, by, sel) -> bool:
                 time.sleep(0.1)
                 el.click()
                 return True
-            except Exception:
+            except:
                 continue
-    except Exception:
+    except:
         pass
     return False
 
@@ -150,47 +151,50 @@ def try_iframe_consent(driver) -> bool:
                 driver.switch_to.default_content()
                 return True
             driver.switch_to.default_content()
-        except Exception:
+        except:
             try:
                 driver.switch_to.default_content()
-            except Exception:
+            except:
                 pass
             continue
     return False
 
 def try_didomi_shadow_consent(driver) -> bool:
-    js = """
-    const TEXTS = arguments[0];
-    function searchShadow(root) {
-      const tryClick = (el) => { try { el.click(); return true; } catch(e) { return false; } };
-      const nodes = root.querySelectorAll('button, [role="button"], *');
-      for (const n of nodes) {
-        const txt = (n.textContent||'').trim();
-        if (!txt) continue;
-        for (const t of TEXTS) { if (txt.includes(t)) return tryClick(n); }
-      }
-      return false;
-    }
-    function findDidomiAndClick() {
-      const host = document.querySelector('#didomi-host');
-      if (!host) return false;
-      const roots = [];
-      if (host.shadowRoot) roots.push(host.shadowRoot);
-      const all = host.querySelectorAll('*');
-      for (const el of all) if (el.shadowRoot) roots.push(el.shadowRoot);
-      for (const r of roots) {
-        if (searchShadow(r)) return true;
-        const deep = r.querySelectorAll('*');
-        for (const d of deep) if (d.shadowRoot && searchShadow(d.shadowRoot)) return true;
-      }
-      return false;
-    }
-    return findDidomiAndClick();
-    """
     try:
-        return bool(driver.execute_script(js, CONSENT_TEXTS))
-    except WebDriverException:
+        host = driver.find_element(By.CSS_SELECTOR, "#didomi-host")
+    except:
         return False
+
+    roots_to_search = []
+    try:
+        roots_to_search.append(host.shadow_root)
+    except:
+        pass
+
+    for el in host.find_elements(By.CSS_SELECTOR, "*"):
+        try:
+            roots_to_search.append(el.shadow_root)
+        except:
+            continue
+
+    for shadow in roots_to_search:
+        try:
+            candidates = shadow.find_elements(By.CSS_SELECTOR, "button, [role='button']")
+            for btn in candidates:
+                txt = (btn.text or "").strip()
+                if not txt:
+                    continue
+                for t in CONSENT_TEXTS:
+                    if t in txt:
+                        try:
+                            btn.click()
+                            return True
+                        except:
+                            continue
+        except:
+            continue
+
+    return False
 
 def accept_all_consents(driver, timeout=15) -> bool:
     end = time.time() + timeout
@@ -204,7 +208,7 @@ def accept_all_consents(driver, timeout=15) -> bool:
 
 def slow_scroll(driver, steps=24, dy=1600, pause=0.2):
     for _ in range(steps):
-        driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+        ActionChains(driver).scroll_by_amount(0, dy).perform()
         time.sleep(pause)
 
 def extract_from_srcdoc(srcdoc: str) -> list[str]:
@@ -292,7 +296,7 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
 
                 social_candidates += extract_urls_matching(outer, SOCIAL_PATTERNS)
 
-            except Exception:
+            except:
                 continue
 
         social_urls = dedupe_by_prefix_keep_shortest(social_candidates)
@@ -301,7 +305,7 @@ def handle(review_url: str, headless: bool = True) -> List[str]:
         flat.extend(yt_urls)
         flat.extend(social_urls)
         return sorted(set(flat))
-    except Exception:
+    except:
         return []
     finally:
         driver.quit()

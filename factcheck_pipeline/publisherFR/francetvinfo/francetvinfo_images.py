@@ -1,7 +1,7 @@
-
 import os, re, json, hashlib, math
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 import pandas as pd
+from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -24,6 +24,11 @@ def ext_priority(u: str) -> int:
     if e == ".webp": return 2
     if e == ".avif": return 1
     return 0
+
+def ok_ext(u: str) -> bool:
+    if not u:
+        return False
+    return any(u.lower().split("?")[0].endswith(e) for e in IMG_EXT)
 
 def infer_width_from_url(u: str) -> int:
     m = re.search(r"/fit-in/(\d+)x", u)
@@ -49,133 +54,90 @@ def safe_slug(s: str, n=64) -> str:
     s = re.sub(r"[^\w.-]+", "_", s).strip("._")
     return s[-n:] if len(s) > n else (s or "article")
 
+def parse_srcset_py(srcset: str, base_url: str) -> list[dict]:
+    results = []
+    for part in (srcset or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split()
+        if not bits:
+            continue
+        u = urljoin(base_url, bits[0])
+        w = 0
+        if len(bits) > 1 and bits[1].endswith("w"):
+            try:
+                w = int(bits[1][:-1])
+            except ValueError:
+                pass
+        if not w:
+            w = infer_width_from_url(u)
+        results.append({"url": u, "w": w})
+    return results
 
-JS_EXTRACT = """
-() => {
-  const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
-  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const ok = u => !!u && ALLOWED.some(e => u.toLowerCase().split('?')[0].endsWith(e));
-  const abs = (u) => { try { return new URL(u, location.href).href } catch { return null } };
 
-  function inferWidth(u) {
-    let m = u.match(/\\/fit-in\\/(\\d+)x/);
-    if (m) return parseInt(m[1], 10);
-    m = u.match(/[\\W_](\\d{3,4})w(?:[\\W_]|$)/);
-    if (m) return parseInt(m[1], 10);
-    m = u.match(/\\/(\\d{3,4})x\\d{2,4}\\//);
-    if (m) return parseInt(m[1], 10);
-    return 0;
-  }
+def extract_page_content(page, article_url: str):
+    body = page.query_selector("div.c-body")
+    if not body:
+        return [], []
 
-  function parseSrcset(ss) {
-    // returns array of {url, w}
-    const out = [];
-    (ss || '').split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
-      const bits = part.split(/\\s+/);
-      const u = abs(bits[0]);
-      let w = 0;
-      if (bits.length > 1 && /\\d+w$/.test(bits[1])) {
-        try { w = parseInt(bits[1].slice(0, -1), 10) } catch { w = 0 }
-      }
-      if (u) out.push({url: u, w});
-    });
-    return out;
-  }
+    images = []
 
-  const body = document.querySelector("div.c-body");
-  if (!body) return {images: [], tweets: []};
+    for fig in body.query_selector_all("figure"):
+        cap_el = fig.query_selector("figcaption")
+        cap = clean(cap_el.inner_text() if cap_el else "")
 
-  const images = [];
-  // Collect from all figures inside c-body
-  for (const fig of body.querySelectorAll("figure")) {
-    const cap = clean((fig.querySelector("figcaption") || {}).textContent || '');
-    // 1) <picture><source srcset=...>
-    for (const pic of fig.querySelectorAll("picture")) {
-      for (const src of pic.querySelectorAll("source")) {
-        const ss = src.getAttribute("srcset") || src.getAttribute("data-srcset");
-        for (const it of parseSrcset(ss)) {
-          if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-        }
-      }
-      // fallback <img> inside picture
-      const im = pic.querySelector("img");
-      if (im) {
-        let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-        if (!u) {
-          const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-          if (ss) {
-            for (const it of parseSrcset(ss)) {
-              if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-            }
-          }
-        } else {
-          u = abs(u);
-          if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-        }
-      }
-    }
-    // 2) <noscript> fallbacks
-    for (const ns of fig.querySelectorAll("noscript")) {
-      const tmp = document.createElement("div");
-      tmp.innerHTML = ns.innerHTML;
-      const im = tmp.querySelector("img");
-      if (im) {
-        const u = abs(im.getAttribute("src"));
-        if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-      }
-    }
-    // 3) Plain <img> not in <picture>
-    for (const im of fig.querySelectorAll("img")) {
-      if (im.closest("picture")) continue;
-      let u = im.currentSrc || im.getAttribute("src") || im.getAttribute("data-src") || im.getAttribute("data-original") || "";
-      if (u) {
-        u = abs(u);
-        if (ok(u)) images.push({url: u, w: inferWidth(u), cap});
-      } else {
-        const ss = im.getAttribute("srcset") || im.getAttribute("data-srcset");
-        if (ss) {
-          for (const it of parseSrcset(ss)) {
-            if (ok(it.url)) images.push({url: it.url, w: it.w || inferWidth(it.url), cap});
-          }
-        }
-      }
-    }
-  }
+        for pic in fig.query_selector_all("picture"):
+            for src in pic.query_selector_all("source"):
+                ss = src.get_attribute("srcset") or src.get_attribute("data-srcset") or ""
+                for c in parse_srcset_py(ss, article_url):
+                    if ok_ext(c["url"]):
+                        images.append({"url": c["url"], "w": c["w"], "cap": cap})
+            img = pic.query_selector("img")
+            if img:
+                u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or img.get_attribute("data-original") or ""
+                if u:
+                    u = urljoin(article_url, u)
+                    if ok_ext(u):
+                        images.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
+                else:
+                    ss = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                    for c in parse_srcset_py(ss, article_url):
+                        if ok_ext(c["url"]):
+                            images.append({"url": c["url"], "w": c["w"], "cap": cap})
 
-  // Embedded tweets (if any) inside c-body
-  const tweets = [];
-  for (const ifr of body.querySelectorAll(".pic-embed-container iframe[src*='platform.twitter.com/embed/Tweet.html']," +
-                                          ".twitter-tweet iframe[src*='platform.twitter.com/embed/Tweet.html']")) {
-    tweets.push({iframeSelector: makeUniqueSelector(ifr)});
-  }
+        for ns in fig.query_selector_all("noscript"):
+            inner = ns.inner_html()
+            if not inner:
+                continue
+            soup = BeautifulSoup(inner, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag:
+                u = urljoin(article_url, img_tag.get("src", ""))
+                if ok_ext(u):
+                    images.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
 
-  function makeUniqueSelector(el) {
-    // Build a robust selector for this iframe
-    if (!el) return null;
-    // prefer a stable data attribute if present
-    if (el.id) return `iframe#${CSS.escape(el.id)}`;
-    // fallback: nth-of-type within its parent
-    const parent = el.parentElement;
-    if (!parent) return "iframe";
-    const tag = el.tagName.toLowerCase();
-    const siblings = Array.from(parent.children).filter(n => n.tagName.toLowerCase() === tag);
-    const idx = siblings.indexOf(el) + 1;
-    // climb to c-body to reduce ambiguity
-    let p = parent;
-    let chain = [`${tag}:nth-of-type(${idx})`];
-    while (p && p !== document && !p.matches("div.c-body")) {
-      const t = p.tagName.toLowerCase();
-      const sib = Array.from(p.parentElement ? p.parentElement.children : []).filter(n => n.tagName.toLowerCase() === t);
-      const i = sib.indexOf(p) + 1;
-      chain.unshift(`${t}:nth-of-type(${i})`);
-      p = p.parentElement;
-    }
-    return `div.c-body ${chain.join(" > ")}`;
-  }
+        for img in fig.query_selector_all("img"):
+            if img.evaluate("el => !!el.closest('picture')"):
+                continue
+            u = img.evaluate("el => el.currentSrc || ''") or img.get_attribute("src") or img.get_attribute("data-src") or img.get_attribute("data-original") or ""
+            if u:
+                u = urljoin(article_url, u)
+                if ok_ext(u):
+                    images.append({"url": u, "w": infer_width_from_url(u), "cap": cap})
+            else:
+                ss = img.get_attribute("srcset") or img.get_attribute("data-srcset") or ""
+                for c in parse_srcset_py(ss, article_url):
+                    if ok_ext(c["url"]):
+                        images.append({"url": c["url"], "w": c["w"], "cap": cap})
 
-  return {images, tweets};
-}
-"""
+    tw_sel = (
+        ".pic-embed-container iframe[src*='platform.twitter.com/embed/Tweet.html'],"
+        ".twitter-tweet iframe[src*='platform.twitter.com/embed/Tweet.html']"
+    )
+    tweet_handles = body.query_selector_all(tw_sel)
+
+    return images, tweet_handles
 
 
 CONSENT_TEXTS = [
@@ -188,7 +150,6 @@ CONSENT_TEXTS = [
     "Continue without agreeing",
     "Reject all",
     "Reject All",
-    "Continue without consent",
     "J'accepte",
     "Accepter",
 ]
@@ -201,7 +162,7 @@ def try_dismiss_consent(page):
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(400)
                 return True
-        except Exception:
+        except:
             pass
         try:
             loc = page.locator(f"button:has-text('{t}')")
@@ -209,7 +170,7 @@ def try_dismiss_consent(page):
                 loc.first.click(timeout=1200)
                 page.wait_for_timeout(400)
                 return True
-        except Exception:
+        except:
             pass
 
     for fr in page.frames:
@@ -220,7 +181,7 @@ def try_dismiss_consent(page):
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(400)
                     return True
-            except Exception:
+            except:
                 pass
             try:
                 loc = fr.locator(f"button:has-text('{t}')")
@@ -228,15 +189,14 @@ def try_dismiss_consent(page):
                     loc.first.click(timeout=1200)
                     page.wait_for_timeout(400)
                     return True
-            except Exception:
+            except:
                 pass
     return False
 
 
 def scrape_urls(article_url, out_dir="franceinfo_assets", headless=True, store_json=True):
     os.makedirs(out_dir, exist_ok=True)
-    rows = []
-    items=[]
+    items = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,
@@ -249,7 +209,6 @@ def scrape_urls(article_url, out_dir="franceinfo_assets", headless=True, store_j
         )
         page = context.new_page()
 
-        rec = {"reviewURL": article_url}
         try:
             page.goto(article_url, wait_until="domcontentloaded", timeout=60000)
 
@@ -264,9 +223,7 @@ def scrape_urls(article_url, out_dir="franceinfo_assets", headless=True, store_j
             except PWTimeout:
                 pass
 
-            payload = page.evaluate(JS_EXTRACT)
-            candidates = payload.get("images", [])
-            tweet_iframes = payload.get("tweets", [])
+            candidates, tweet_handles = extract_page_content(page, article_url)
 
             def score(c):
                 w = int(c.get("w") or infer_width_from_url(c["url"]))
@@ -279,18 +236,15 @@ def scrape_urls(article_url, out_dir="franceinfo_assets", headless=True, store_j
                 if not cur or score(c) > score(cur):
                     best_by_asset[key] = c
 
-            asset_best_list = list(best_by_asset.values())
-
             groups = {}
             no_cap = []
-            for c in asset_best_list:
+            for c in best_by_asset.values():
                 capk = caption_key(c.get("cap", ""))
                 if capk:
                     groups.setdefault(capk, []).append(c)
                 else:
                     no_cap.append(c)
-            chosen_by_caption = [max(lst, key=score) for lst in groups.values()]
-            final_images = chosen_by_caption + no_cap
+            final_images = [max(lst, key=score) for lst in groups.values()] + no_cap
 
             prefix = safe_slug(article_url)
             for c in final_images:
@@ -322,39 +276,26 @@ def scrape_urls(article_url, out_dir="franceinfo_assets", headless=True, store_j
                         with open(path, "wb") as f:
                             f.write(r.body())
                         saved = path
-                except Exception:
+                except:
                     saved = None
 
-                image_name = saved
-                if (saved != None):
-                    image_name = os.path.basename(saved)
+                image_name = os.path.basename(saved) if saved else None
                 items.append({"image_url": img, "caption": cap, "path": image_name})
 
-            for idx, tw in enumerate(tweet_iframes, 1):
-                sel = tw.get("iframeSelector")
-                if not sel:
-                    continue
-                loc = page.locator(sel).first
+            for idx, ifr_handle in enumerate(tweet_handles, 1):
                 try:
-                    if loc.count() == 0:
-                        continue
-                    loc.wait_for(state="visible", timeout=4000)
-                    loc.scroll_into_view_if_needed(timeout=2000)
+                    ifr_handle.scroll_into_view_if_needed(timeout=2000)
                     page.wait_for_timeout(500)
-
                     h = hashlib.md5(f"{article_url}#tweet#{idx}".encode("utf-8")).hexdigest()[:12]
                     tpath = os.path.join(out_dir, f"{idx}_{h}.png")
-                    eh = loc.element_handle()
-                    if eh:
-                        eh.screenshot(path=tpath)
-                        image_name = os.path.basename(tpath)
-                        items.append({"image_url": article_url, "caption": "", "path": image_name})
-                except Exception:
+                    ifr_handle.screenshot(path=tpath)
+                    image_name = os.path.basename(tpath)
+                    items.append({"image_url": article_url, "caption": "", "path": image_name})
+                except:
                     pass
 
         except Exception as e:
             print(f"[fetch error] {article_url}: {e}")
-
 
         browser.close()
 
@@ -371,4 +312,3 @@ def handle(review_url: str, location_info: str):
         csv_path = os.path.join(location_info, "image_info.csv")
         out_df.to_csv(csv_path, index=False, encoding="utf-8")
     return 0
-

@@ -20,7 +20,7 @@ python -m factcheck_pipeline.pipeline \
 |----------|-------------|
 | `--api_key` | Google Fact Check Tools API key |
 | `--publisherFR` / `--publisherDE` | Publisher module name |
-| `--publisher_site_filter` | ClaimReview publisher site filter (e.g., `lemonde.fr`) |
+| `--publisher_site_filter` | ClaimReview publisher filter (e.g., `lemonde.fr`) |
 | `--out_jsonl` | Output JSONL file path |
 | `--assets_dir` | Directory for downloaded images and videos |
 | `--language_code` | Language code: `fr` or `de` |

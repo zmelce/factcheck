@@ -35,7 +35,7 @@ python -m factcheck_pipeline.pipeline \
 | French  | 5,170  | 2014–2025 | FR |
 | German  | 3,555  | 2017–2023 | DE |
 
-Each record contains: reviewer organization, claim statement, claim date, normalized verdict label, review title, review URL, LLM-extracted evidence and generated justifications (Gemini-2.5 Pro, Llama3.3-70B, Qwen2.5-72B).
+Each sample contains: reviewer organization, claim statement, claim date, normalized verdict label, review title, review URL, LLM-extracted evidence and generated justifications (Gemini-2.5 Pro, Llama3.3-70B, Qwen2.5-72B).
 
 ## Download
 

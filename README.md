@@ -30,7 +30,7 @@ python -m factcheck_pipeline.pipeline \
 
 ## Dataset Overview
 
-| Dataset | Claims | Period | 
+| Dataset | Size | Period | 
 |---------|--------|--------|
 | French claims  | 5,170  | 2014–2025 | 
 | German claims | 3,555  | 2017–2023 | 

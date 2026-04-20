@@ -1,3 +1,5 @@
+# Download LLM evidence-justification datasets for ClaimReview claims in French and German
+
 import argparse
 import os
 import urllib.request

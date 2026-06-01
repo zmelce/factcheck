@@ -25,8 +25,8 @@ python -m factcheck_pipeline.pipeline \
 | `--assets_dir` | Directory for downloaded images and videos |
 | `--language_code` | Language code: `fr` or `de` |
 | `--max_items` | Maximum number of claims to process (optional) |
-| `--skip_images` | Skip image downloading (optional) |
-| `--skip_videos` | Skip video downloading (optional) |
+| `--skip_images` | Skip image (optional) |
+| `--skip_videos` | Skip video (optional) |
 
 ## Dataset Overview
 
@@ -53,4 +53,10 @@ python download_LLMdata.py --lang de    # German only
 ```
 
 Downloaded files will be saved to the `data/` directory.
+
+## Citation
+
+This repository is associated with the following publication: 
+
+Hüsünbeyi, Z. M., Mouilleron, V., Uhling, L., Foppe, D., Scheffler, T., & Seddah, D. (2026). Multilingual, Multimodal Pipeline for Creating Authentic and Structured Fact-Checked Claim Dataset. In Proceedings of the Fifteenth Language Resources and Evaluation Conference (LREC 2026) (pp. 6038–6055). European Language Resources Association (ELRA). https://doi.org/10.63317/3p5czhw4hvv3.
 
